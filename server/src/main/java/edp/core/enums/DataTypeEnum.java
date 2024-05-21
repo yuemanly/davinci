@@ -24,7 +24,9 @@ import edp.core.exception.SourceException;
 
 public enum DataTypeEnum {
 
-    MYSQL("mysql", "mysql", "com.mysql.jdbc.Driver", "`", "`", "'", "'"),
+    MYSQL("mysql", "mysql", "com.mysql.cj.jdbc.Driver", "`", "`", "'", "'"),
+
+    HIVE2("hive2", "hive", "org.apache.hive.jdbc.HiveDriver", "`", "`", "`", "`"),
 
     ORACLE("oracle", "oracle", "oracle.jdbc.driver.OracleDriver", "\"", "\"", "\"", "\""),
 
@@ -36,7 +38,7 @@ public enum DataTypeEnum {
 
     MONGODB("mongo", "mongodb", "mongodb.jdbc.MongoDriver", "`", "`", "\"", "\""),
 
-    ELASTICSEARCH("elasticsearch", "elasticsearch", "", "", "", "'", "'"),
+    ELASTICSEARCH("elasticsearch", "elasticsearch", "com.amazon.opendistroforelasticsearch.jdbc.Driver", "", "", "'", "'"),
 
     PRESTO("presto", "presto", "com.facebook.presto.jdbc.PrestoDriver", "\"", "\"", "\"", "\""),
 
@@ -52,8 +54,9 @@ public enum DataTypeEnum {
 
     HANA("sap", "sap hana", "com.sap.db.jdbc.Driver", "", "", "'", "'"),
 
-    IMPALA("impala", "impala", "com.cloudera.impala.jdbc41.Driver", "", "", "'", "'");
+    IMPALA("impala", "impala", "com.cloudera.impala.jdbc41.Driver", "", "", "'", "'"),
 
+    TDENGINE("TAOS", "TAOS", "com.taosdata.jdbc.TSDBDriver", "'", "'", "\"", "\"");
 
     private String feature;
     private String desc;
@@ -76,7 +79,7 @@ public enum DataTypeEnum {
     public static DataTypeEnum urlOf(String jdbcUrl) throws SourceException {
         String url = jdbcUrl.toLowerCase().trim();
         for (DataTypeEnum dataTypeEnum : values()) {
-            if (url.startsWith(String.format(Consts.JDBC_PREFIX_FORMATER, dataTypeEnum.feature))) {
+            if (url.startsWith(String.format(Consts.JDBC_PREFIX_FORMATTER, dataTypeEnum.feature))) {
                 return dataTypeEnum;
             }
         }

@@ -28,16 +28,16 @@ export interface IDavinciUser {
 export interface IOrganization {
   id: number
   name: string
-  description: string
-  avatar: string
-  allowCreateProject?: number
-  allowDeleteOrTransferProject?: number
-  allowChangeVisibility?: number
-  memberPermission?: number
-  projectNum?: number
-  memberNum?: number
-  roleNum?: number
   role?: number
+  avatar: string
+  roleNum?: number
+  memberNum?: number
+  projectNum?: number
+  description: string
+  memberPermission?: number
+  allowCreateProject?: number
+  allowChangeVisibility?: number
+  allowDeleteOrTransferProject?: number
 }
 
 export interface IOrganizationMember {
@@ -63,7 +63,8 @@ export interface IOrganizationState {
   roleModalLoading: boolean,
   projectDetail: IProject,
   projectAdmins: IOrganizationMember[],
-  projectRoles: IOrganizationRole[]
+  projectRoles: IOrganizationRole[],
+  inviteMemberfetching?: boolean
 }
 
 export interface IMembers {
@@ -86,6 +87,8 @@ export interface IMembersState {
   formVisible: boolean
   modalLoading: boolean
   currentMember: IOrganizationMember
+  notUsersModalVisible: boolean
+  notUsers: string[],
   changeRoleFormCategory: string
   changeRoleFormVisible: boolean
   changeRoleModalLoading: boolean
@@ -106,12 +109,10 @@ export interface IMembersProps {
   ) => any
   currentOrganization: IOrganization
   inviteMemberList: any
-  onInviteMember: (ordId: number, memId: number) => any
+  onInviteMember: (ordId: number, members: string[], needEmail: boolean, resolve: (result: any) => void) => any
   handleSearchMember: (keywords: string) => any
-  toThatUserProfile: (url: string) => any
   onGetRoleListByMemberId: onGetRoleListByMemberId
 }
-
 
 export interface IProjectsStates {
   formType?: string
@@ -122,58 +123,60 @@ export interface IProjectsStates {
   pageNum: number
   pageSize: number
   currentProject: any
+  starModalVisble: boolean
   organizationProjects: IProject[]
 }
 
 export interface IProjectsProps {
-  loginUser: any
-  organizationId: number
-  organizations: any
-  projectDetail: any
-  currentOrganization: IOrganization
-  toProject: (id: number) => any
-  deleteProject: (id: number) => any
-  starUser: IStarUser[]
-  collectProjects: IProject[]
-  onAddProject: (project: any, resolve: () => any) => any
-  onEditProject: (project: any, resolve: () => any) => any
-  organizationProjects: IProject[]
-  organizationProjectsDetail: { total?: number; list: IProject[] }
+  children?: React.ReactNode
+  loginUser?: any
+  organizationId?: number
+  organizations?: any
+  projectDetail?: any
+  currentOrganization?: IOrganization
+  toProject?: (id: number) => any
+  deleteProject?: (id: number) => any
+  starUser?: IStarUser[]
+  collectProjects?: IProject[]
+  onAddProject?: (project: any, resolve: () => any) => any
+  onEditProject?: (project: any, resolve: () => any) => any
+  organizationProjects?: IProject[]
+  organizationProjectsDetail?: { total?: number; list: IProject[] }
   unStar?: (id: number) => any
   userList?: (id: number) => any
-  onCheckUniqueName: (
+  onCheckUniqueName?: (
     pathname: any,
     data: any,
     resolve: () => any,
     reject: (error: string) => any
   ) => any
-  getOrganizationProjectsByPagination: (obj: {
+  getOrganizationProjectsByPagination?: (obj: {
     keyword?: string
     pageNum: number
     pageSize: number
   }) => any
-  onLoadOrganizationProjects: (param: {
+  onLoadOrganizationProjects?: (param: {
     id: number
     pageNum?: number
     pageSize?: number
   }) => any
-  onClickCollectProjects: (
+  onClickCollectProjects?: (
     formType,
     project: object,
     resolve: (id: number) => any
   ) => any
-  onLoadCollectProjects: () => any
-  onTransferProject: (id: number, orgId: number, resolve: () => any) => any
-  onSetCurrentProject: (option: any) => any
-  starUserList: IStarUser[]
-  onStarProject: (id: number, resolve: () => any) => any
-  onDeleteProject: (id: number, resolve?: any) => any
-  onGetProjectStarUser: (id: number) => any
-  currentOrganizationProjects: IProject[]
-  organizationMembers: any[]
-  onLoadVizs: (projectId: number) => any
-  onLoadOrganizations: () => any
-  vizs: any
+  onLoadCollectProjects?: () => any
+  onTransferProject?: (id: number, orgId: number, resolve: () => any) => any
+  onSetCurrentProject?: (option: any) => any
+  starUserList?: IStarUser[]
+  onStarProject?: (id: number, resolve: () => any) => any
+  onDeleteProject?: (id: number, resolve?: any) => any
+  onGetProjectStarUser?: (id: number) => any
+  currentOrganizationProjects?: IProject[]
+  organizationMembers?: any[]
+  onLoadVizs?: (projectId: number) => any
+  onLoadOrganizations?: () => any
+  vizs?: any
 }
 
 
@@ -184,6 +187,7 @@ export interface IOrganizationProps {
   inviteMemberList: any
   currentOrganization: IOrganization
   collectProjects: IProject[]
+  currentOrganizationRole: IOrganizationRole[]
   onLoadOrganizationProjects: (param: {id: number, pageNum?: number, pageSize?: number}) => any
   onLoadOrganizationMembers: (id: number) => any
   onLoadOrganizationDetail: (id: number) => any
@@ -192,7 +196,7 @@ export interface IOrganizationProps {
   currentOrganizationProjects: IProject[]
   currentOrganizationProjectsDetail: {total?: number, list: IProject[]}
   currentOrganizationMembers: IOrganizationMember[]
-  onInviteMember: (ordId: number, memId: number) => any
+  onInviteMember: (ordId: number, members: string[], needEmail: boolean, resolve: (result: any) => void) => any
   onSearchMember: (keywords: string) => any
   onClickCollectProjects: (formType: string, project: object, resolve: (id: number) => any) => any
   onLoadCollectProjects: () => any
@@ -200,4 +204,14 @@ export interface IOrganizationProps {
   onDeleteOrganization: (id: number, resolve: () => any) => any
   onCheckUniqueName: (pathname: any, data: any, resolve: () => any, reject: (error: string) => any) => any
   onGetRoleListByMemberId: onGetRoleListByMemberId
+  onLoadOrganizationRole: (id: number) => any
 }
+
+export interface IInviteMemberProps {
+  category: string
+  inviteMemberList: any
+  addHandler: () => void
+  handleSearchMember: (searchValue: string) => any
+  organizationDetail: IOrganization
+}
+

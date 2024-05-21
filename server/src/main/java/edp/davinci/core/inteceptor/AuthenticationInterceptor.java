@@ -70,8 +70,8 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
 
         String token = request.getHeader(Constants.TOKEN_HEADER_STRING);
 
-        AuthShare authShareMethoed = method.getAnnotation(AuthShare.class);
-        if (null != authShareMethoed) {
+        AuthShare authShareMethod = method.getAnnotation(AuthShare.class);
+        if (null != authShareMethod) {
             if (!StringUtils.isEmpty(token) && token.startsWith(Constants.TOKEN_PREFIX)) {
                 String username = tokenUtils.getUsername(token);
                 User user = userService.getByUsername(username);
@@ -113,7 +113,7 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
                 request.setAttribute(Constants.CURRENT_USER, user);
                 return true;
             }
-            log.info("current user is not activated, username: {}", user.getUsername());
+            log.info("Current user is not activated, username:{}", user.getUsername());
             response.setStatus(HttpCodeEnum.FAIL.getCode());
             ResultMap resultMap = new ResultMap(tokenUtils);
             response.getWriter().print(JSONObject.toJSONString(resultMap.failAndRefreshToken(request).message("Account not active yet. Please check your email to activate your account")));

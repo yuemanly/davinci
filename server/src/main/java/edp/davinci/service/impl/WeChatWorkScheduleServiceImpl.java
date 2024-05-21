@@ -18,9 +18,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +31,7 @@ import java.util.Map;
 @Slf4j
 @Service("weChatWorkScheduleService")
 public class WeChatWorkScheduleServiceImpl extends BaseScheduleService implements ScheduleService {
+    
     @Autowired
     private CronJobMapper cronJobMapper;
 
@@ -62,10 +65,10 @@ public class WeChatWorkScheduleServiceImpl extends BaseScheduleService implement
         scheduleLogger.info("CronJob({}) is start! --------------", jobId);
 
         List<ImageContent> images = null;
-        User creater = userMapper.getById(cronJob.getCreateBy());
+        User creator = userMapper.getById(cronJob.getCreateBy());
 
         if (cronJobConfig.getType().equals(CronJobMediaType.IMAGE.getType())) {
-            images = generateImages(jobId, cronJobConfig, creater.getId());
+            images = generateImages(jobId, cronJobConfig, creator.getId());
         }
 
         if (CollectionUtils.isEmpty(images)) {
@@ -76,31 +79,31 @@ public class WeChatWorkScheduleServiceImpl extends BaseScheduleService implement
         String url = cronJobConfig.getWebHookUrl();
 
         for (ImageContent imageContent : images) {
-            if (null == imageContent) {
-                log.error("CronJob({}) image is null !", cronJob.getId());
+            if (null == imageContent || imageContent.getImageFile() == null) {
+                log.error("CronJob({}) image is null!", cronJob.getId());
                 return;
             }
             File imageContentFile = imageContent.getImageFile();
             // 将大于2M的图片进行压缩
             if (imageContentFile.length() > (2 * 1024 * 1024)) {
-                scheduleLogger.info("image size must be less than 2M, the size is {} !", imageContentFile.length());
+                scheduleLogger.info("Image size must be less than 2M, the size is {} !", imageContentFile.length());
 
-                scheduleLogger.info("image start to compressed!", imageContentFile.getPath());
+                scheduleLogger.info("Image start to compressed!", imageContentFile.getPath());
                 File file = FileUtils.compressedImage(imageContent.getImageFile().getPath());
 
-                scheduleLogger.info("image compressed successfully! the size is: {}.", file.length());
+                scheduleLogger.info("Image compressed successfully! the size is {}.", file.length());
                 imageContent.setImageFile(file);
 
-                scheduleLogger.info("the original image has been replaced with a new image(path: {})!", imageContentFile.getPath());
+                scheduleLogger.info("The original image has been replaced with a new image, path:{}!", imageContentFile.getPath());
             }
+            
             scheduleLogger.info("CronJob({}) is ready to request WeChatWork API", cronJob.getId());
 
-            Map mbMap = getMD5AndBase64(imageContent.getImageFile());
-
-            Map weChatWorkMap = new HashMap();
+            Map<String, Object> weChatWorkMap = new HashMap<>();
             weChatWorkMap.put("msgtype", "image");
 
-            Map imageMap = new HashMap();
+            Map<String, String> mbMap = getMD5AndBase64(imageContent.getImageFile());
+            Map<String, String> imageMap = new HashMap<>();
             imageMap.put("base64", mbMap.get("base64"));
             imageMap.put("md5", mbMap.get("md5"));
             weChatWorkMap.put("image", imageMap);
@@ -119,13 +122,10 @@ public class WeChatWorkScheduleServiceImpl extends BaseScheduleService implement
      * @param file 图片
      * @return
      */
-    public static Map getMD5AndBase64(File file) {
-        Map resMap = new HashMap();
-        InputStream in = null;
-        ByteArrayOutputStream bytesOut = null;
-        try {
-            in = new FileInputStream(file);
-            bytesOut = new ByteArrayOutputStream((int) file.length());
+    private Map<String, String> getMD5AndBase64(File file) {
+        Map<String, String> resMap = new HashMap<>();
+        try (InputStream in = new FileInputStream(file);
+                ByteArrayOutputStream bytesOut = new ByteArrayOutputStream((int) file.length());) {
 
             byte[] buf = new byte[1024];
             int len = -1;
@@ -146,15 +146,8 @@ public class WeChatWorkScheduleServiceImpl extends BaseScheduleService implement
             byte b[] = md.digest();
             resMap.put("md5", MD5Util.byteToString(b));
             return resMap;
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        } finally {
-            close(in);
-            close(bytesOut);
+        } catch (Exception e) {
+            log.error(e.toString(), e);
         }
         return null;
     }
@@ -162,15 +155,4 @@ public class WeChatWorkScheduleServiceImpl extends BaseScheduleService implement
     private static String encode(byte[] data) {
         return Base64.getEncoder().encodeToString(data);
     }
-
-    private static void close(Closeable c) {
-        if (c != null) {
-            try {
-                c.close();
-            } catch (IOException e) {
-                // nothing
-            }
-        }
-    }
-
 }

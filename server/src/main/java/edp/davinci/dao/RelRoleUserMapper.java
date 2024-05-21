@@ -24,9 +24,12 @@ import edp.davinci.model.RelRoleUser;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
+@Component
 public interface RelRoleUserMapper {
     int insert(RelRoleUser relRoleUser);
 
@@ -54,6 +57,9 @@ public interface RelRoleUserMapper {
 
 
     List<RelRoleUser> getByIds(List<Long> ids);
+
+
+    Set<RelRoleUser> selectByUserAndRoles(@Param("userId") Long userId, @Param("roleIds") Set<Long> roleIds);
 
 
     @Select({

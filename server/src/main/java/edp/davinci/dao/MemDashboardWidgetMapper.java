@@ -35,12 +35,10 @@ public interface MemDashboardWidgetMapper {
     @Delete({"delete from mem_dashboard_widget where id = #{id}"})
     int deleteById(@Param("id") Long id);
 
-
     @Select({
             "select * from mem_dashboard_widget where id = #{id}"
     })
     MemDashboardWidget getById(@Param("id") Long id);
-
 
     @Update({
             "update mem_dashboard_widget",
@@ -58,7 +56,7 @@ public interface MemDashboardWidgetMapper {
     })
     int update(MemDashboardWidget memDashboardWidget);
 
-    @Select({"select * from mem_dashboard_widget where dashboard_id = #{dashboardId}"})
+    @Select({"select * from mem_dashboard_widget where dashboard_id = #{dashboardId} order by create_time"})
     List<MemDashboardWidget> getByDashboardId(@Param("dashboardId") Long dashboardId);
 
     @Delete({

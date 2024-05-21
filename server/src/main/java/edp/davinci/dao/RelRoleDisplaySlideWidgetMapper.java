@@ -23,10 +23,12 @@ import edp.davinci.model.RelRoleDisplaySlideWidget;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Set;
 
+@Component
 public interface RelRoleDisplaySlideWidgetMapper {
 
     int insertBatch(List<RelRoleDisplaySlideWidget> list);
@@ -72,8 +74,17 @@ public interface RelRoleDisplaySlideWidgetMapper {
             "INNER JOIN display d ON d.id = ds.display_id " +
             "WHERE d.project_id = #{projectId} " +
             ") "})
-    int deleteByProjectId(@Param("projectId") Long projectId);
+    int deleteByProject(@Param("projectId") Long projectId);
 
+    @Delete({"DELETE rrdsw FROM rel_role_display_slide_widget rrdsw WHERE rrdsw.role_id = #{roleId} and rrdsw.mem_display_slide_widget_id IN " +
+        "( " +
+        "SELECT mdsw.id " +
+        "FROM mem_display_slide_widget mdsw " +
+        "INNER JOIN display_slide ds ON ds.id = mdsw.display_slide_id " +
+        "INNER JOIN display d ON d.id = ds.display_id " +
+        "WHERE d.project_id = #{projectId} " +
+        ") "})
+    int deleteByRoleAndProject(@Param("roleId") Long roleId, @Param("projectId") Long projectId);
 
     int copyRoleSlideWidgetRelation(@Param("relSlideCopies") List<RelModelCopy> memCopies, @Param("userId") Long userId);
 }

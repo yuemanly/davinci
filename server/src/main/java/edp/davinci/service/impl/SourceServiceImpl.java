@@ -26,7 +26,7 @@ import edp.core.enums.DataTypeEnum;
 import edp.core.exception.NotFoundException;
 import edp.core.exception.ServerException;
 import edp.core.exception.SourceException;
-import edp.core.exception.UnAuthorizedExecption;
+import edp.core.exception.UnAuthorizedException;
 import edp.core.model.DBTables;
 import edp.core.model.JdbcSourceInfo;
 import edp.core.model.JdbcSourceInfo.JdbcSourceInfoBuilder;
@@ -39,6 +39,7 @@ import edp.davinci.core.model.DataUploadEntity;
 import edp.davinci.core.model.RedisMessageEntity;
 import edp.davinci.core.utils.CsvUtils;
 import edp.davinci.core.utils.ExcelUtils;
+import edp.davinci.core.utils.SourcePasswordEncryptUtils;
 import edp.davinci.dao.SourceMapper;
 import edp.davinci.dao.ViewMapper;
 import edp.davinci.dto.projectDto.ProjectDetail;
@@ -69,6 +70,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import static edp.core.consts.Consts.AT_SYMBOL;
 import static edp.core.consts.Consts.JDBC_DATASOURCE_DEFAULT_VERSION;
 import static edp.davinci.core.common.Constants.DAVINCI_TOPIC_CHANNEL;
 
@@ -122,14 +124,14 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     @Override
     public List<Source> getSources(Long projectId, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         ProjectDetail projectDetail = null;
         try {
             projectDetail = projectService.getProjectDetail(projectId, user, false);
         } catch (NotFoundException e) {
             throw e;
-        } catch (UnAuthorizedExecption e) {
+        } catch (UnAuthorizedException e) {
             return null;
         }
 
@@ -147,19 +149,23 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
     @Override
     public SourceDetail getSourceDetail(Long id, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(id);
 
         ProjectPermission projectPermission = getProjectPermission(source.getProjectId(), user);
 
         if (projectPermission.getSourcePermission() == UserPermissionEnum.HIDDEN.getPermission()) {
-            throw new UnAuthorizedExecption();
+            throw new UnAuthorizedException();
         }
 
         SourceDetail sourceDetail = new SourceDetail();
         BeanUtils.copyProperties(source, sourceDetail);
-
+        // Decrypt the password in config
+        JSONObject jsonObject = JSONObject.parseObject(sourceDetail.getConfig());
+        String decrypt = SourcePasswordEncryptUtils.decrypt((String) jsonObject.get("password"));
+        jsonObject.put("password", decrypt);
+        sourceDetail.setConfig(jsonObject.toString());
         if (projectPermission.getSourcePermission() == UserPermissionEnum.READ.getPermission()) {
             sourceDetail.setConfig(null);
         }
@@ -177,7 +183,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     @Override
     @Transactional
     public Source createSource(SourceCreate sourceCreate, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Long projectId = sourceCreate.getProjectId();
         checkWritePermission(entity, projectId, user, "create");
@@ -200,19 +206,22 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
             // 测试连接
             if (!testConnection(config)) {
-                throw new ServerException("test source connection fail");
+                throw new ServerException("Test source connection fail");
             }
 
             Source source = new Source().createdBy(user.getId());
             BeanUtils.copyProperties(sourceCreate, source);
-            source.setConfig(JSONObject.toJSONString(config));
-
+            // Decrypt the password in config
+            JSONObject jsonObject = JSONObject.parseObject(JSONObject.toJSONString(config));
+            String encrypt = SourcePasswordEncryptUtils.encrypt((String) jsonObject.get("password"));
+            jsonObject.put("password", encrypt);
+            source.setConfig(jsonObject.toString());
             if (sourceMapper.insert(source) != 1) {
-                log.info("create source fail:{}", source.toString());
-                throw new ServerException("create source fail");
+                log.info("Create source fail, source:{}", source.toString());
+                throw new ServerException("Create source fail");
             }
 
-            optLogger.info("source ({}) create by user (:{})", source.toString(), user.getId());
+            optLogger.info("Source({}) is create by user({})", source.toString(), user.getId());
             return source;
 
         } finally {
@@ -225,18 +234,22 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
         Source source = sourceMapper.getById(id);
 
         if (null == source) {
-            log.warn("source (:{}) is not found", id);
-            throw new NotFoundException("this source is not found");
+            log.warn("Source({}) is not found", id);
+            throw new NotFoundException("This source is not found");
         }
 
         return source;
     }
 
     private boolean testConnection(SourceConfig config) {
+        // The password is encrypted
+        String encrypt = SourcePasswordEncryptUtils.encrypt(config.getPassword());
         return sqlUtils.init(
+                SourceTypeEnum.JDBC.getType(),
+                config.getName(),
                 config.getUrl(),
                 config.getUsername(),
-                config.getPassword(),
+                encrypt,
                 config.getVersion(),
                 config.getProperties(),
                 config.isExt()
@@ -253,7 +266,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     @Override
     @Transactional
     public Source updateSource(SourceInfo sourceInfo, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(sourceInfo.getId());
         checkWritePermission(entity, source.getProjectId(), user, "update");
@@ -273,7 +286,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
             // 测试连接
             if (!testConnection(config)) {
-                throw new ServerException("test source connection fail");
+                throw new ServerException("Test source connection fail");
             }
 
             // 失效的数据源
@@ -282,15 +295,19 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
             BeanUtils.copyProperties(sourceInfo, source);
             source.updatedBy(user.getId());
-            source.setConfig(JSONObject.toJSONString(sourceInfo.getConfig()));
-
+            // Decrypt the password in config
+            JSONObject jsonObject = JSONObject.parseObject(JSONObject.toJSONString(sourceInfo.getConfig()));
+            String encrypt = SourcePasswordEncryptUtils.encrypt((String) jsonObject.get("password"));
+            jsonObject.put("password", encrypt);
+            source.setConfig(jsonObject.toString());
             if (sourceMapper.update(source) != 1) {
-                log.info("update source fail:{}", source.toString());
-                throw new ServerException("update source fail:unspecified error");
+                log.info("Update source fail, source:{}", source.toString());
+                throw new ServerException("Update source fail, unspecified error");
             }
 
             // 释放失效数据源
             String copyKey = SourceUtils.getKey(
+                    sourceCopy.getId() + AT_SYMBOL + sourceCopy.getName(),
                     sourceCopy.getJdbcUrl(),
                     sourceCopy.getUsername(),
                     sourceCopy.getPassword(),
@@ -298,6 +315,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                     sourceCopy.isExt());
 
             String newKey = SourceUtils.getKey(
+                    sourceCopy.getId() + AT_SYMBOL + config.getName(),
                     config.getUrl(),
                     config.getUsername(),
                     config.getPassword(),
@@ -308,7 +326,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                 releaseSource(sourceCopy);
             }
 
-            optLogger.info("source ({}) update by user (:{})", source.toString(), user.getId());
+            optLogger.info("Source({}) is update by user({})", source.toString(), user.getId());
             return source;
 
         } finally {
@@ -325,7 +343,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     @Override
     @Transactional
-    public boolean deleteSrouce(Long id, User user) throws NotFoundException, UnAuthorizedExecption, ServerException {
+    public boolean deleteSource(Long id, User user) throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(id);
 
@@ -333,12 +351,12 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
         List<View> viewList = viewMapper.getBySourceId(id);
         if (!CollectionUtils.isEmpty(viewList)) {
-            log.warn("There is at least one view using the source ({}), it is can not be deleted", id);
+            log.warn("There is at least one view using the source({}), it is can not be deleted", id);
             throw new ServerException("There is at least one view using the source, it is can not be deleted");
         }
 
         if (sourceMapper.deleteById(id) == 1) {
-            optLogger.info("source ({}) delete by user (:{})", source.toString(), user.getId());
+            optLogger.info("Source({}) is delete by user({})", source.toString(), user.getId());
             releaseSource(source);
             return true;
         }
@@ -347,7 +365,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     }
 
     /**
-     * 测试连接
+     * 测试数据源
      *
      * @param sourceTest
      * @return
@@ -369,23 +387,25 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                 sourceTest.setExt(false);
             }
 
-            testConnection = sqlUtils
-                    .init(
-                            sourceTest.getUrl(),
-                            sourceTest.getUsername(),
-                            sourceTest.getPassword(),
-                            sourceTest.getVersion(),
-                            sourceTest.getProperties(),
-                            sourceTest.isExt()
-                    ).testConnection();
+            JdbcSourceInfo jdbcSourceInfo = JdbcSourceInfoBuilder
+                    .aJdbcSourceInfo()
+                    .withJdbcUrl(sourceTest.getUrl())
+                    .withUsername(sourceTest.getUsername())
+                    .withPassword(sourceTest.getPassword())
+                    .withProperties(sourceTest.getProperties())
+                    .withExt(sourceTest.isExt())
+                    .withDbVersion(sourceTest.getVersion())
+                    .build();
+
+            testConnection = new SourceUtils(jdbcDataSource).testSource(jdbcSourceInfo);
 
         } catch (SourceException e) {
-            log.error(e.getMessage());
+            log.error(e.toString(), e);
             throw new ServerException(e.getMessage());
         }
 
         if (!testConnection) {
-            throw new ServerException("test source connection fail");
+            throw new ServerException("Test source connection fail");
         }
 
         return true;
@@ -401,7 +421,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     @Override
     public void validCsvmeta(Long sourceId, UploadMeta uploadMeta, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(sourceId);
 
@@ -411,15 +431,15 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
             boolean tableIsExist = sqlUtils.init(source).tableIsExist(uploadMeta.getTableName());
             if (uploadMeta.getMode() == UploadModeEnum.NEW.getMode()) {
                 if (tableIsExist) {
-                    throw new ServerException("table " + uploadMeta.getTableName() + " is already exist");
+                    throw new ServerException("Table " + uploadMeta.getTableName() + " is already exist");
                 }
             } else {
                 if (!tableIsExist) {
-                    throw new ServerException("table " + uploadMeta.getTableName() + " is not exist");
+                    throw new ServerException("Table " + uploadMeta.getTableName() + " is not exist");
                 }
             }
         } catch (SourceException e) {
-            log.error(e.getMessage());
+            log.error(e.toString(), e);
             throw new ServerException(e.getMessage());
         }
     }
@@ -437,7 +457,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     @Override
     @Transactional
     public Boolean dataUpload(Long sourceId, SourceDataUpload sourceDataUpload, MultipartFile file, User user,
-                              String type) throws NotFoundException, UnAuthorizedExecption, ServerException {
+                              String type) throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(sourceId);
 
@@ -459,8 +479,8 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
         DataTypeEnum dataTypeEnum = DataTypeEnum.urlOf(source.getJdbcUrl());
         if (dataTypeEnum != DataTypeEnum.MYSQL) {
-            log.info("Unsupported data source， {}", source.getJdbcUrl());
-            throw new ServerException("Unsupported data source: " + source.getJdbcUrl());
+            log.info("Unsupported data source, url:{}", source.getJdbcUrl());
+            throw new ServerException("Unsupported data source, url:" + source.getJdbcUrl());
         }
 
         try {
@@ -493,7 +513,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
             return obj;
         }
 
-        log.info("user (:{}) have not permission to get source (:{}) {}", user.getId(), sourceId, operation);
+        log.info("User({}) have not permission to get source({}), operation:{}", user.getId(), sourceId, operation);
         return null;
     }
 
@@ -580,7 +600,6 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
         try {
             tableInfo = sqlUtils.init(source).getTableInfo(dbName, tableName);
         } catch (SourceException e) {
-            e.printStackTrace();
             throw new ServerException(e.getMessage());
         }
 
@@ -599,16 +618,16 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
     @Override
     public boolean reconnect(Long id, DbBaseInfo dbBaseInfo, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(id);
 
         checkWritePermission(entity, source.getProjectId(), user, "reconnect");
 
         if (!(dbBaseInfo.getDbUser().equals(source.getUsername())
-                && dbBaseInfo.getDbPassword().equals(source.getPassword()))) {
-            log.warn("reconnect source (:{}) error, dbuser and dbpassword is wrong", id);
-            throw new ServerException("user or password is wrong");
+                && dbBaseInfo.getDbPassword().equals(SourcePasswordEncryptUtils.decrypt(source.getPassword())))) {
+            log.warn("Reconnect source({}) error, username and password is wrong", id);
+            throw new ServerException("Username or password is wrong");
         }
 
         releaseSource(source);
@@ -617,36 +636,39 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     }
 
     /**
-     * 释放失效数据源
+     * 释放数据源
      *
      * @param source
      */
     private void releaseSource(Source source) {
 
+        String name = source.getId() + AT_SYMBOL + source.getName();
+
+        SourceUtils sourceUtils = new SourceUtils(jdbcDataSource);
+        JdbcSourceInfo jdbcSourceInfo = JdbcSourceInfoBuilder
+                .aJdbcSourceInfo()
+                .withName(name)
+                .withJdbcUrl(source.getJdbcUrl())
+                .withUsername(source.getUsername())
+                .withPassword(source.getPassword())
+                .withDbVersion(source.getDbVersion())
+                .withExt(source.isExt())
+                .build();
+
+        sourceUtils.releaseDataSource(jdbcSourceInfo);
+
         if (redisUtils.isRedisEnable()) {
             Map<String, Object> map = new HashMap<>();
 
+            map.put("name", name);
             map.put("url", source.getJdbcUrl());
             map.put("username", source.getUsername());
             map.put("password", source.getPassword());
             map.put("version", source.getDbVersion());
             map.put("ext", source.isExt());
 
-            publishReconnect(JSON.toJSONString(map));
-        } else {
-            SourceUtils sourceUtils = new SourceUtils(jdbcDataSource);
-            JdbcSourceInfo jdbcSourceInfo = JdbcSourceInfoBuilder
-                    .aJdbcSourceInfo()
-                    .withJdbcUrl(source.getJdbcUrl())
-                    .withUsername(source.getUsername())
-                    .withPassword(source.getPassword())
-                    .withDatabase(source.getDatabase())
-                    .withDbVersion(source.getDbVersion())
-                    .withProperties(source.getProperties())
-                    .withExt(source.isExt())
-                    .build();
-
-            sourceUtils.releaseDataSource(jdbcSourceInfo);
+            SourceUtils.getReleaseSourceSet().add(String.valueOf(source.getId()));
+            publishReconnect(JSON.toJSONString(map), source.getId());
         }
     }
 
@@ -654,28 +676,25 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      * 向redis发布reconnect消息
      *
      * @param message
+     * @param id
      */
-    private void publishReconnect(String message) {
-
-        //	String flag = MD5Util.getMD5(UUID.randomUUID().toString() + id, true, 32);
-        // the flag is deprecated
-        String flag = "-1";
-        redisUtils.convertAndSend(DAVINCI_TOPIC_CHANNEL, new RedisMessageEntity(SourceMessageHandler.class, message, flag));
+    private void publishReconnect(String message, Long id) {
+        redisUtils.convertAndSend(DAVINCI_TOPIC_CHANNEL, new RedisMessageEntity(SourceMessageHandler.class, message, String.valueOf(id)));
     }
 
     /**
      * 建表
      *
-     * @param fileds
+     * @param fields
      * @param sourceDataUpload
      * @param source
      * @throws ServerException
      */
-    private void createTable(Set<QueryColumn> fileds, SourceDataUpload sourceDataUpload, Source source)
+    private void createTable(Set<QueryColumn> fields, SourceDataUpload sourceDataUpload, Source source)
             throws ServerException {
 
-        if (CollectionUtils.isEmpty(fileds)) {
-            throw new ServerException("there is have not any fields");
+        if (CollectionUtils.isEmpty(fields)) {
+            throw new ServerException("There is have not any fields");
         }
 
         SqlUtils sqlUtils = this.sqlUtils.init(source);
@@ -687,36 +706,36 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
         if (sourceDataUpload.getMode() == UploadModeEnum.COVER.getMode()) {
             ST st = stg.getInstanceOf("createTable");
             st.add("tableName", sourceDataUpload.getTableName());
-            st.add("fields", fileds);
+            st.add("fields", fields);
             st.add("primaryKeys", StringUtils.isEmpty(sourceDataUpload.getPrimaryKeys()) ? null
                     : sourceDataUpload.getPrimaryKeys().split(","));
             st.add("indexKeys", sourceDataUpload.getIndexList());
             sql = st.render();
             String dropSql = "DROP TABLE IF EXISTS `" + sourceDataUpload.getTableName() + "`";
             sqlUtils.jdbcTemplate().execute(dropSql);
-            log.info("drop table sql : {}", dropSql);
+            log.info("Drop table sql:{}", dropSql);
         } else {
             boolean tableIsExist = sqlUtils.tableIsExist(sourceDataUpload.getTableName());
             if (sourceDataUpload.getMode() == UploadModeEnum.NEW.getMode()) {
                 if (!tableIsExist) {
                     ST st = stg.getInstanceOf("createTable");
                     st.add("tableName", sourceDataUpload.getTableName());
-                    st.add("fields", fileds);
+                    st.add("fields", fields);
                     st.add("primaryKeys", sourceDataUpload.getPrimaryKeys());
                     st.add("indexKeys", sourceDataUpload.getIndexList());
 
                     sql = st.render();
                 } else {
-                    throw new ServerException("table " + sourceDataUpload.getTableName() + " is already exist");
+                    throw new ServerException("Table " + sourceDataUpload.getTableName() + " is already exist");
                 }
             } else {
                 if (!tableIsExist) {
-                    throw new ServerException("table " + sourceDataUpload.getTableName() + " is not exist");
+                    throw new ServerException("Table " + sourceDataUpload.getTableName() + " is not exist");
                 }
             }
         }
 
-        log.info("create table sql : {}", sql);
+        log.info("Create table sql:{}", sql);
         try {
             if (!StringUtils.isEmpty(sql)) {
                 sqlUtils.jdbcTemplate().execute(sql);
@@ -754,11 +773,10 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                 if (tableIsExist) {
                     executeInsert(sourceDataUpload.getTableName(), headers, values, sqlUtils);
                 } else {
-                    throw new ServerException("table " + sourceDataUpload.getTableName() + " is not exist");
+                    throw new ServerException("Table " + sourceDataUpload.getTableName() + " is not exist");
                 }
             }
         } catch (ServerException e) {
-            e.printStackTrace();
             throw new ServerException(e.getMessage());
         }
 
@@ -795,19 +813,19 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
             st.add("tableName", tableName);
             st.add("columns", headers);
             String sql = st.render();
-            log.info("sql : {}", st.render());
+            log.info("Insert sql:{}", st.render());
             List<Future> futures = new ArrayList<>();
 
             // 分页批量插入
             long startTime = System.currentTimeMillis();
-            log.info("execute insert start ---- {}", DateUtils.toyyyyMMddHHmmss(startTime));
+            log.info("Execute insert start ---- {}", DateUtils.toyyyyMMddHHmmss(startTime));
             for (int pageNum = 1; pageNum < totalPage + 1; pageNum++) {
                 int localPageNum = pageNum;
                 int localPageSize = pageSize;
                 futures.add(executorService.submit(() -> {
                     int starNum = (localPageNum - 1) * localPageSize;
                     int endNum = Math.min(localPageNum * localPageSize, totalSize);
-                    log.info("executeInsert thread-{} : start:{}, end:{}", localPageNum, starNum, endNum);
+                    log.info("ExecuteInsert thread-{} : start:{}, end:{}", localPageNum, starNum, endNum);
                     sqlUtils.executeBatch(sql, headers, values.subList(starNum, endNum));
                 }));
             }
@@ -817,10 +835,9 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                     future.get();
                 }
                 long endTime = System.currentTimeMillis();
-                log.info("execute insert end ---- {}", DateUtils.toyyyyMMddHHmmss(endTime));
-                log.info("execution time {} second", (endTime - startTime) / 1000);
+                log.info("Execute insert end ---- {}", DateUtils.toyyyyMMddHHmmss(endTime));
+                log.info("Execution time {} second", (endTime - startTime) / 1000);
             } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
                 throw new ServerException(e.getMessage());
             } finally {
                 executorService.shutdown();

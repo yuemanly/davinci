@@ -42,7 +42,7 @@ public class CustomDataSourceUtils {
     private static volatile Map<String, CustomDataSource> customDataSourceMap = new HashMap<>();
 
     @Getter
-    private static volatile Map<String, List<String>> dataSourceVersoin = new HashMap<String, List<String>>();
+    private static volatile Map<String, List<String>> dataSourceVersion = new HashMap<String, List<String>>();
 
     public static CustomDataSource getInstance(String jdbcUrl, String version) {
         String dataSourceName = SourceUtils.getDataSourceName(jdbcUrl);
@@ -82,7 +82,7 @@ public class CustomDataSourceUtils {
             CustomDataSource customDataSource = mapper.convertValue(entry.getValue(), CustomDataSource.class);
 
             if (StringUtils.isEmpty(customDataSource.getName()) || StringUtils.isEmpty(customDataSource.getDriver())) {
-                throw new Exception("Load custom datasource error: name or driver cannot be EMPTY");
+                throw new Exception("Load custom datasource error: name or driver cannot be empty");
             }
 
             if ("null".equals(customDataSource.getName().trim().toLowerCase())) {
@@ -113,23 +113,23 @@ public class CustomDataSourceUtils {
                 }
             }
 
-            List<String> versoins = null;
-            if (dataSourceVersoin.containsKey(customDataSource.getName())) {
-                versoins = dataSourceVersoin.get(customDataSource.getName());
+            List<String> versions = null;
+            if (dataSourceVersion.containsKey(customDataSource.getName())) {
+                versions = dataSourceVersion.get(customDataSource.getName());
             } else {
-                versoins = new ArrayList<>();
+                versions = new ArrayList<>();
             }
             if (StringUtils.isEmpty(customDataSource.getVersion())) {
-                versoins.add(0, JDBC_DATASOURCE_DEFAULT_VERSION);
+                versions.add(0, JDBC_DATASOURCE_DEFAULT_VERSION);
             } else {
-                versoins.add(customDataSource.getVersion());
+                versions.add(customDataSource.getVersion());
             }
 
-            if (versoins.size() == 1 && versoins.get(0).equals(JDBC_DATASOURCE_DEFAULT_VERSION)) {
-                versoins.remove(0);
+            if (versions.size() == 1 && versions.get(0).equals(JDBC_DATASOURCE_DEFAULT_VERSION)) {
+                versions.remove(0);
             }
 
-            dataSourceVersoin.put(customDataSource.getName(), versoins);
+            dataSourceVersion.put(customDataSource.getName(), versions);
             customDataSourceMap.put(getKey(customDataSource.getName(), customDataSource.getVersion()), customDataSource);
         }
     }

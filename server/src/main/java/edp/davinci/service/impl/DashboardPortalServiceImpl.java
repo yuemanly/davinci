@@ -19,20 +19,9 @@
 
 package edp.davinci.service.impl;
 
-import java.util.Iterator;
-import java.util.List;
-import java.util.stream.Collectors;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import edp.core.exception.NotFoundException;
 import edp.core.exception.ServerException;
-import edp.core.exception.UnAuthorizedExecption;
+import edp.core.exception.UnAuthorizedException;
 import edp.core.utils.BaseLock;
 import edp.core.utils.CollectionUtils;
 import edp.davinci.core.enums.CheckEntityEnum;
@@ -52,6 +41,16 @@ import edp.davinci.model.User;
 import edp.davinci.service.DashboardPortalService;
 import edp.davinci.service.ProjectService;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Iterator;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service("dashboardPortalService")
 @Slf4j
@@ -93,7 +92,7 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
      * @return
      */
     @Override
-    public List<DashboardPortal> getDashboardPortals(Long projectId, User user) throws NotFoundException, UnAuthorizedExecption, ServerException {
+    public List<DashboardPortal> getDashboardPortals(Long projectId, User user) throws NotFoundException, UnAuthorizedException, ServerException {
 
         if (!checkReadPermission(entity, projectId, user)) {
             return null;
@@ -129,8 +128,8 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 		DashboardPortal dashboardPortal = dashboardPortalMapper.getById(id);
         
 		if (null == dashboardPortal) {
-			log.warn("dashboardPortal ({}) is not found", id);
-            throw new NotFoundException("dashboardPortal is not found");
+			log.warn("DashboardPortal({}) is not found", id);
+            throw new NotFoundException("DashboardPortal is not found");
         }
 
 		return dashboardPortal;
@@ -145,7 +144,7 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
      */
     @Override
     @Transactional
-    public DashboardPortal createDashboardPortal(DashboardPortalCreate dashboardPortalCreate, User user) throws NotFoundException, UnAuthorizedExecption, ServerException {
+    public DashboardPortal createDashboardPortal(DashboardPortalCreate dashboardPortalCreate, User user) throws NotFoundException, UnAuthorizedException, ServerException {
 
     	Long projectId = dashboardPortalCreate.getProjectId();
     	checkWritePermission(entity, projectId, user, "create");
@@ -164,10 +163,10 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 			BeanUtils.copyProperties(dashboardPortalCreate, dashboardPortal);
 
 			if (dashboardPortalMapper.insert(dashboardPortal) != 1) {
-				throw new ServerException("create dashboardPortal fail");
+				throw new ServerException("Create dashboardPortal fail");
 			}
 			
-			optLogger.info("dashboardPortal ({}) is created by user (:{})", dashboardPortal.toString(), user.getId());
+			optLogger.info("DashboardPortal({}) is created by user({})", dashboardPortal.toString(), user.getId());
 
 			List<Long> roleIds = dashboardPortalCreate.getRoleIds();
 			
@@ -179,7 +178,7 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 
 				if (!CollectionUtils.isEmpty(rels)) {
 					relRolePortalMapper.insertBatch(rels);
-					optLogger.info("create dashboardPortal ({}) limit role ({}) access", dashboardPortal.getId(),
+					optLogger.info("Create dashboardPortal({}) limit role({}) access", dashboardPortal.getId(),
 							roles.stream().map(r -> r.getId()).collect(Collectors.toList()));
 				}
 			}
@@ -202,7 +201,7 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 	@Override
 	@Transactional
 	public DashboardPortal updateDashboardPortal(DashboardPortalUpdate dashboardPortalUpdate, User user)
-			throws NotFoundException, UnAuthorizedExecption, ServerException {
+			throws NotFoundException, UnAuthorizedException, ServerException {
 
 		DashboardPortal dashboardPortal = getDashboardPortal(dashboardPortalUpdate.getId());
 		Long projectId = dashboardPortal.getProjectId();
@@ -228,13 +227,13 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 			dashboardPortal.updatedBy(user.getId());
 
 			if (dashboardPortalMapper.update(dashboardPortal) != 1) {
-				throw new ServerException("update dashboardPortal fail");
+				throw new ServerException("Update dashboardPortal fail");
 			}
 
-			optLogger.info("dashboardPortal ({}) is update by (:{}), origin:({})", dashboardPortal.toString(),
+			optLogger.info("DashboardPortal({}) is update by user({}), origin:{}", dashboardPortal.toString(),
 					user.getId(), origin);
 
-			relRolePortalMapper.deleteByProtalId(id);
+			relRolePortalMapper.deleteByPortalId(id);
 			if (!CollectionUtils.isEmpty(dashboardPortalUpdate.getRoleIds())) {
 				List<Role> roles = roleMapper.getRolesByIds(dashboardPortalUpdate.getRoleIds());
 				List<RelRolePortal> list = roles.stream()
@@ -242,7 +241,7 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 						.collect(Collectors.toList());
 				if (!CollectionUtils.isEmpty(list)) {
 					relRolePortalMapper.insertBatch(list);
-					optLogger.info("update dashboardPortal ({}) limit role ({}) access", id,
+					optLogger.info("Update dashboardPortal({}) limit role({}) access", id,
 							roles.stream().map(r -> r.getId()).collect(Collectors.toList()));
 				}
 			}
@@ -257,12 +256,12 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 
     @Override
     public List<Long> getExcludeRoles(Long id) {
-        return relRolePortalMapper.getExecludeRoles(id);
+        return relRolePortalMapper.getExcludeRoles(id);
     }
 
     @Override
     @Transactional
-    public boolean postPortalVisibility(Role role, VizVisibility vizVisibility, User user) throws NotFoundException, UnAuthorizedExecption, ServerException {
+    public boolean postPortalVisibility(Role role, VizVisibility vizVisibility, User user) throws NotFoundException, UnAuthorizedException, ServerException {
 
     	DashboardPortal portal =getDashboardPortal(vizVisibility.getId());
 
@@ -270,12 +269,12 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
 
         if (vizVisibility.isVisible()) {
             if (relRolePortalMapper.delete(portal.getId(), role.getId()) > 0) {
-                optLogger.info("dashboardPortal ({}) can be accessed by role ({}), update by (:{})", portal, role, user.getId());
+                optLogger.info("DashboardPortal({}) can be accessed by role({}), update by user({})", portal, role, user.getId());
             }
         } else {
             RelRolePortal relRolePortal = new RelRolePortal(portal.getId(), role.getId()).createdBy(user.getId());
             relRolePortalMapper.insert(relRolePortal);
-            optLogger.info("dashboardPortal ({}) limit role ({}) access, create by (:{})", portal, role, user.getId());
+            optLogger.info("DashboardPortal({}) limit role({}) access, create by user({})", portal, role, user.getId());
         }
 
         return true;
@@ -290,7 +289,7 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
      */
     @Override
     @Transactional
-    public boolean deleteDashboardPortal(Long id, User user) throws NotFoundException, UnAuthorizedExecption {
+    public boolean deleteDashboardPortal(Long id, User user) throws NotFoundException, UnAuthorizedException {
 
     	DashboardPortal dashboardPortal = getDashboardPortal(id);
     	checkWritePermission(entity, dashboardPortal.getProjectId(), user, "delete");
@@ -306,8 +305,8 @@ public class DashboardPortalServiceImpl extends VizCommonService implements Dash
         dashboardMapper.deleteByPortalId(id);
 
         if (dashboardPortalMapper.deleteById(id) == 1) {
-            relRolePortalMapper.deleteByProtalId(dashboardPortal.getId());
-            optLogger.info("dashboaard portal ({}) delete by user (:{}) ", dashboardPortal.toString(), user.getId());
+            relRolePortalMapper.deleteByPortalId(dashboardPortal.getId());
+            optLogger.info("DashboardPortal({}) is delete by user({}) ", dashboardPortal.toString(), user.getId());
             return true;
         }
         return false;

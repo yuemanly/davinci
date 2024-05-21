@@ -19,7 +19,7 @@
  */
 
 import React from 'react'
-import FormType from 'antd/lib/form/Form'
+import FormType, { WrappedFormUtils } from 'antd/lib/form/Form'
 import {
   Row,
   Col,
@@ -46,11 +46,12 @@ import {
   IMembers,
   ISetRange
 } from '../types'
+import NotUsersList from './NotUsersList'
 
 export class MemberList extends React.PureComponent<
   IMembersProps,
   IMembersState
-> {
+  > {
   constructor(props) {
     super(props)
     this.state = {
@@ -60,6 +61,8 @@ export class MemberList extends React.PureComponent<
       currentMember: null,
       formVisible: false,
       modalLoading: false,
+      notUsersModalVisible: false,
+      notUsers: [],
       changeRoleFormVisible: false,
       changeRoleModalLoading: false,
       organizationMembers: [],
@@ -68,7 +71,7 @@ export class MemberList extends React.PureComponent<
     }
   }
 
-  private MemberForm: FormType
+  private MemberForm: WrappedFormUtils
   private ChangeRoleForm: FormType
 
   private refHandles = {
@@ -115,7 +118,7 @@ export class MemberList extends React.PureComponent<
   }
 
   private afterMemberFormClose = () => {
-    this.MemberForm.props.form.resetFields()
+    this.MemberForm.resetFields()
   }
 
   private removeMemberForm = (text, obj) => () => {
@@ -144,11 +147,19 @@ export class MemberList extends React.PureComponent<
 
   private add = () => {
     const { currentOrganization } = this.props
-    this.MemberForm.props.form.validateFieldsAndScroll((err, values) => {
+    this.MemberForm.validateFieldsAndScroll((err, values) => {
       if (!err) {
-        const { projectId } = values
+        const { members, needEmail } = values
         const orgId = currentOrganization.id
-        this.props.onInviteMember(orgId, projectId)
+        this.props.onInviteMember(orgId, members, needEmail, (result) => {
+          if (result && result.notUsers.length) {
+            this.setState({
+              notUsersModalVisible: true,
+              notUsers: result.notUsers
+            })
+          }
+          this.props.loadOrganizationsMembers(Number(orgId))
+        })
         this.hideMemberForm()
       }
     })
@@ -156,7 +167,7 @@ export class MemberList extends React.PureComponent<
 
   private search = (event) => {
     const value = event.target.value
-    const { organizationMembers } = this.state
+    const { organizationMembers } = this.props
     const result = this.getOrgMembersBysearch(organizationMembers, value)
     this.updateOrganizationMembers(
       value && value.length ? result : this.props.organizationMembers
@@ -191,23 +202,22 @@ export class MemberList extends React.PureComponent<
     if (nextOrgMembers && nextOrgMembers !== organizationMembers) {
       keywords && keywords.length
         ? this.updateOrganizationMembers(
-            this.getOrgMembersBysearch(nextOrgMembers, keywords)
-          )
+          this.getOrgMembersBysearch(nextOrgMembers, keywords)
+        )
         : this.updateOrganizationMembers(nextOrgMembers)
     }
   }
 
-  private searchMember = () => {
-    this.forceUpdate(() => {
-      this.MemberForm.props.form.validateFieldsAndScroll((err, values) => {
-        if (!err) {
-          const { searchValue } = values
-          if (searchValue) {
-            this.props.handleSearchMember(searchValue)
-          }
-        }
-      })
+  private hideNotUsersModal = () => {
+    this.setState({
+      notUsersModalVisible: false
     })
+  }
+
+  private searchMember = (searchValue: string) => {
+    if (searchValue && searchValue.length) {
+      this.props.handleSearchMember(searchValue)
+    }
   }
 
   private hideChangeRoleForm = () => {
@@ -219,13 +229,6 @@ export class MemberList extends React.PureComponent<
 
   private afterChangeRoleFormClose = () => {
     this.ChangeRoleForm.props.form.resetFields()
-  }
-
-  private toUserProfile = (obj) => () => {
-    const { id } = obj
-    if (id) {
-      this.props.toThatUserProfile(`account/profile/${id}`)
-    }
   }
 
   private getContent(record: IMembers) {
@@ -280,7 +283,9 @@ export class MemberList extends React.PureComponent<
       changeRoleFormVisible,
       changeRoleModalLoading,
       changeRoleFormCategory,
-      organizationMembers
+      organizationMembers,
+      notUsersModalVisible,
+      notUsers
     } = this.state
     const { inviteMemberList, currentOrganization, loginUser } = this.props
     let CreateButton = void 0
@@ -303,10 +308,9 @@ export class MemberList extends React.PureComponent<
         key: 'user',
         render: (text) => (
           <div className={styles.avatarWrapper}>
-            <Avatar path={text.avatar} size="small" enlarge={true} />
+            <Avatar path={text.avatar} size="small" border enlarge={true} />
             <span
               className={styles.avatarName}
-              onClick={this.toUserProfile(text)}
             >
               {text.username}
             </span>
@@ -327,12 +331,10 @@ export class MemberList extends React.PureComponent<
         render: (text, record) => {
           return (
             <span>
-              <Popover
-                title="角色列表"
-                content={this.getContent(record)}
-                onMouseEnter={this.getRoleList(record)}
-              >
-                <a href="javascript:;">获取角色列表</a>
+              <Popover title="角色列表" content={this.getContent(record)}>
+                <a href="javascript:;" onMouseEnter={this.getRoleList(record)}>
+                  获取角色列表
+                </a>
               </Popover>
               {record?.user?.id !== loginUser.id ? (
                 currentOrganization?.role === 1 ? (
@@ -354,11 +356,11 @@ export class MemberList extends React.PureComponent<
                     </Popconfirm>
                   </>
                 ) : (
-                  ''
-                )
+                    ''
+                  )
               ) : (
-                ''
-              )}
+                  ''
+                )}
             </span>
           )
         }
@@ -379,6 +381,7 @@ export class MemberList extends React.PureComponent<
           <div className={styles.tableWrap}>
             <Table
               bordered
+              rowKey="id"
               columns={columns}
               dataSource={organizationMembers}
               pagination={pagination}
@@ -396,11 +399,10 @@ export class MemberList extends React.PureComponent<
           <MemberForm
             category={category}
             addHandler={this.add}
-            submitLoading={modalLoading}
             inviteMemberList={inviteMemberList}
             handleSearchMember={this.searchMember}
             wrappedComponentRef={this.refHandles.MemberForm}
-            organizationOrTeam={this.props.currentOrganization}
+            organizationDetail={this.props.currentOrganization}
           />
         </Modal>
         <Modal
@@ -417,6 +419,18 @@ export class MemberList extends React.PureComponent<
             submitLoading={changeRoleModalLoading}
             wrappedComponentRef={this.refHandles.ChangeRoleForm}
             changeHandler={this.changRole}
+          />
+        </Modal>
+        <Modal
+          title={null}
+          visible={notUsersModalVisible}
+          footer={null}
+          onCancel={this.hideNotUsersModal}
+        >
+          <NotUsersList 
+            category={category}
+            notUsers={notUsers}
+            hideHandler={this.hideNotUsersModal}
           />
         </Modal>
       </div>

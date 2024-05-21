@@ -142,7 +142,7 @@ public class OrganizationController extends BaseController {
         }
 
         if (file.isEmpty() || StringUtils.isEmpty(file.getOriginalFilename())) {
-            ResultMap resultMap = new ResultMap(tokenUtils).failAndRefreshToken(request).message("avatar file can not be EMPTY");
+            ResultMap resultMap = new ResultMap(tokenUtils).failAndRefreshToken(request).message("Avatar file can not be empty");
             return ResponseEntity.status(resultMap.getCode()).body(resultMap);
         }
 
@@ -335,40 +335,13 @@ public class OrganizationController extends BaseController {
         }
 
 
-        BatchInviteMemberResult result = organizationService.batchInviteMembers(orgId, inviteMembers, user);
+        BatchInviteMemberResult result = organizationService.batchInviteCustomMembers(orgId, inviteMembers, user);
         if (result.getStatus() == HttpStatus.OK.value()) {
             return ResponseEntity.ok(new ResultMap(tokenUtils).successAndRefreshToken(request).payload(result));
         } else {
             return ResponseEntity.status(result.getStatus()).body(new ResultMap(tokenUtils).failAndRefreshToken(request).payload(result));
         }
     }
-
-
-//    /**
-//     * 成员确认邀请
-//     *
-//     * @param request
-//     * @return
-//     */
-//    @ApiOperation(value = "member confirm invite")
-//    @AuthIgnore
-//    @PostMapping("/confirminvite/{token}")
-//    public ResponseEntity confirmInvite(@PathVariable("token") String token,
-//                                        HttpServletRequest request) {
-//        if (StringUtils.isEmpty(token)) {
-//            ResultMap resultMap = new ResultMap(tokenUtils).failAndRefreshToken(request).message("The invitation confirm token can not be EMPTY");
-//            return ResponseEntity.status(resultMap.getCode()).body(resultMap);
-//        }
-//        try {
-//            ResultMap resultMap = organizationService.confirmInviteNoLogin(token);
-//            return ResponseEntity.status(resultMap.getCode()).body(resultMap);
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//            log.error(e.getMessage());
-//            return ResponseEntity.badRequest().body(HttpCodeEnum.SERVER_ERROR.getMessage());
-//        }
-//    }
-
 
     /**
      * 成员确认邀请
@@ -383,7 +356,7 @@ public class OrganizationController extends BaseController {
                                         @ApiIgnore @CurrentUser User user,
                                         HttpServletRequest request) {
         if (StringUtils.isEmpty(token)) {
-            ResultMap resultMap = new ResultMap(tokenUtils).failAndRefreshToken(request).message("The invitation confirm token can not be EMPTY");
+            ResultMap resultMap = new ResultMap(tokenUtils).failAndRefreshToken(request).message("The invitation confirm token can not be empty");
             return ResponseEntity.status(resultMap.getCode()).body(resultMap);
         }
         OrganizationInfo organizationInfo = organizationService.confirmInvite(token, user);
@@ -415,14 +388,14 @@ public class OrganizationController extends BaseController {
      *
      * @param relationId
      * @param user
-     * @param organzationRole
+     * @param organizationRole
      * @param request
      * @return
      */
     @ApiOperation(value = "change member role or organization", consumes = MediaType.APPLICATION_JSON_VALUE)
     @PutMapping(value = "/member/{relationId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity updateMemberRole(@PathVariable Long relationId,
-                                           @Valid @RequestBody OrganzationRole organzationRole,
+                                           @Valid @RequestBody OrganizationRole organizationRole,
                                            @ApiIgnore BindingResult bindingResult,
                                            @ApiIgnore @CurrentUser User user,
                                            HttpServletRequest request) {
@@ -437,7 +410,7 @@ public class OrganizationController extends BaseController {
             return ResponseEntity.status(resultMap.getCode()).body(resultMap);
         }
 
-        organizationService.updateMemberRole(relationId, user, organzationRole.getRole());
+        organizationService.updateMemberRole(relationId, user, organizationRole.getRole());
         return ResponseEntity.ok(new ResultMap(tokenUtils).successAndRefreshToken(request));
     }
 

@@ -42,6 +42,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.stringtemplate.v4.ST;
 
+import javax.validation.constraints.NotNull;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
@@ -83,13 +84,9 @@ public class SqlParseUtils {
             return null;
         }
 
-        sqlStr = SqlUtils.filterAnnotate(sqlStr);
-        sqlStr = sqlStr.replaceAll(NEW_LINE_CHAR, SPACE).trim();
         sqlStr = replaceSystemVariables(sqlStr, user, isMaintainer);
 
-        char delimiter = getSqlTempDelimiter(sqlTempDelimiter);
-
-        Pattern p = Pattern.compile(getReg(REG_SQL_PLACEHOLDER, delimiter, false));
+        Pattern p = Pattern.compile(getPlaceholderReg(sqlTempDelimiter));
         Matcher matcher = p.matcher(sqlStr);
 
         if (!matcher.find()) {
@@ -104,23 +101,23 @@ public class SqlParseUtils {
             ExecutorService executorService = Executors.newFixedThreadPool(variables.size() > 4 ? 4 : variables.size());
             try {
                 List<Future> futures = new ArrayList<>(variables.size());
-				variables.forEach(variable -> futures.add(executorService.submit(() -> {
-					SqlVariableTypeEnum typeEnum = SqlVariableTypeEnum.typeOf(variable.getType());
-					if (null != typeEnum) {
-						switch (typeEnum) {
-						case QUERYVAR:
-							queryParamMap.put(variable.getName().trim(), SqlVariableValueTypeEnum
-									.getValues(variable.getValueType(), variable.getDefaultValues(), variable.isUdf()));
-							break;
-						case AUTHVARE:
-							if (null != variable) {
-								List<String> v = getAuthVarValue(variable, null);
-								authParamMap.put(variable.getName().trim(), null == v ? new ArrayList<>() : v);
-							}
-							break;
-						}
-					}
-				})));
+                variables.forEach(variable -> futures.add(executorService.submit(() -> {
+                    SqlVariableTypeEnum typeEnum = SqlVariableTypeEnum.typeOf(variable.getType());
+                    if (null != typeEnum) {
+                        switch (typeEnum) {
+                            case QUERYVAR:
+                                queryParamMap.put(variable.getName().trim(), SqlVariableValueTypeEnum
+                                        .getValues(variable.getValueType(), variable.getDefaultValues(), variable.isUdf()));
+                                break;
+                            case AUTHVAR:
+                                if (null != variable) {
+                                    List<String> v = getAuthVarValue(variable, null);
+                                    authParamMap.put(variable.getName().trim(), null == v ? new ArrayList<>() : v);
+                                }
+                                break;
+                        }
+                    }
+                })));
 
                 try {
                     for (Future future : futures) {
@@ -138,6 +135,11 @@ public class SqlParseUtils {
             }
         }
         return new SqlEntity(sqlStr, queryParamMap, authParamMap);
+    }
+
+    private String getPlaceholderReg(String delimiter) {
+        delimiter = "\\" + delimiter;
+        return String.format(REG_SQL_PLACEHOLDER, delimiter, delimiter);
     }
 
     public List<String> getAuthVarValue(SqlVariable variable, String email) {
@@ -169,27 +171,47 @@ public class SqlParseUtils {
             return null;
         }
 
-        char delimiter = getSqlTempDelimiter(sqlTempDelimiter);
+        //查找 auth@var
+        Deque<String> deque = new ArrayDeque<>();
+        deque.push(sql);
 
-        // 替换auth@var
-        Pattern p = Pattern.compile(getReg(REG_AUTHVAR, delimiter, true));
-        Matcher matcher = p.matcher(sql);
-
-        Map<String, List<SqlOperatorEnum>> operatorMap = Arrays.stream(SqlOperatorEnum.values()).collect(Collectors.groupingBy(SqlOperatorEnum::getValue));
-
-        Set<String> expSet = new HashSet<>();
-        while (matcher.find()) {
-            String group = matcher.group();
-            for (String key : operatorMap.keySet()) {
-                if (group.toUpperCase().contains(key)) {
-                    expSet.add(group);
+        Pattern p = Pattern.compile(getAuthVarReg(sqlTempDelimiter));
+        Set<String> authVarFragments = new HashSet<>();
+        while (!deque.isEmpty()) {
+            Matcher matcher = p.matcher(deque.pop());
+            while (matcher.find()) {
+                String group = matcher.group();
+                if (SqlUtils.isSelect(group)) {
+                    if (group.startsWith(PARENTHESES_START)) {
+                        group = group.substring(1);
+                    }
+                    if (group.endsWith(PARENTHESES_END)) {
+                        group = group.substring(0, group.length() - 1);
+                    }
+                    deque.push(group);
+                } else {
+                    authVarFragments.add(group);
                 }
             }
         }
 
+        Map<String, List<SqlOperatorEnum>> operatorMap = Arrays.stream(SqlOperatorEnum.values()).collect(Collectors.groupingBy(SqlOperatorEnum::getValue));
+        Set<String> expSet = new HashSet<>();
+
+        for (String fragment : authVarFragments) {
+            match:
+            for (String key : operatorMap.keySet()) {
+                if (fragment.toUpperCase().contains(key)) {
+                    expSet.add(fragment);
+                    break match;
+                }
+            }
+        }
+
+        // 替换auth@var
         found:
         if (!CollectionUtils.isEmpty(expSet)) {
-            Map<String, String> parsedMap = getParsedExpression(expSet, authParamMap, delimiter);
+            Map<String, String> parsedMap = getParsedExpression(expSet, authParamMap, sqlTempDelimiter);
             if (CollectionUtils.isEmpty(parsedMap)) {
                 break found;
             }
@@ -200,7 +222,9 @@ public class SqlParseUtils {
             }
         }
 
+        char delimiter = sqlTempDelimiter.charAt(0);
         ST st = new ST(sql, delimiter, delimiter);
+
         if (!CollectionUtils.isEmpty(authParamMap) && !CollectionUtils.isEmpty(expSet)) {
             authParamMap.forEach((k, v) -> {
                 List values = authParamMap.get(k);
@@ -211,49 +235,76 @@ public class SqlParseUtils {
                 }
             });
         }
+
         // 替换query@var
         if (!CollectionUtils.isEmpty(queryParamMap)) {
             queryParamMap.forEach(st::add);
         }
+
         sql = st.render();
         return sql;
     }
 
-    public List<String> getSqls(String sql, boolean isQuery) {
+    public static String getAuthVarReg(String delimiter) {
+        delimiter = "\\" + delimiter;
+        return String.format(REG_AUTHVAR, delimiter, delimiter, delimiter, delimiter);
+    }
 
-        sql = sql.trim();
+    /**
+     * 从view中获取查询和执行的sql, 统一入口
+     *
+     * @param sqlStr
+     * @param isQuery
+     * @return
+     */
+    public List<String> getSqls(String sqlStr, boolean isQuery) {
 
-        if (StringUtils.isEmpty(sql)) {
+        sqlStr = sqlStr.trim();
+
+        if (StringUtils.isEmpty(sqlStr)) {
             return null;
         }
 
-        if (sql.startsWith(SEMICOLON)) {
-            sql = sql.substring(1);
+        if (sqlStr.startsWith(SEMICOLON)) {
+            sqlStr = sqlStr.substring(1);
         }
 
-        if (sql.endsWith(SEMICOLON)) {
-            sql = sql.substring(0, sql.length() - 1);
+        if (sqlStr.endsWith(SEMICOLON)) {
+            sqlStr = sqlStr.substring(0, sqlStr.length() - 1);
         }
 
-        List<String> list = null;
+        List<String> list = new ArrayList<>();
 
-        String[] split = sql.split(SEMICOLON);
-        if (split.length > 0) {
-            list = new ArrayList<>();
-            for (String sqlStr : split) {
-                boolean select = sqlStr.toLowerCase().startsWith(SELECT) || sqlStr.toLowerCase().startsWith(WITH);
+        String[] sqls = sqlStr.split(SEMICOLON);
+        if (sqls.length > 0) {
+            for (String sql : sqls) {
+                boolean select = isQuery(sql);
                 if (isQuery) {
                     if (select) {
-                        list.add(sqlStr);
+                        list.add(sql);
                     }
                 } else {
                     if (!select) {
-                        list.add(sqlStr);
+                        SqlUtils.checkSensitiveSql(sql);
+                        list.add(sql);
                     }
                 }
             }
         }
+
         return list;
+    }
+
+    private boolean isQuery(String sql) {
+
+        sql = sql.trim();
+
+        if (sql.toLowerCase().startsWith(SELECT) || sql.toLowerCase().startsWith(WITH)) {
+            return true;
+        }
+
+        String temp = filterAnnotate(sql).trim();
+        return temp.toLowerCase().startsWith(SELECT) || temp.toLowerCase().startsWith(WITH);
     }
 
     public static String rebuildSqlWithFragment(String sql) {
@@ -275,7 +326,7 @@ public class SqlParseUtils {
         return sql;
     }
 
-    private static Map<String, String> getParsedExpression(Set<String> expSet, Map<String, List<String>> authParamMap, char sqlTempDelimiter) {
+    private static Map<String, String> getParsedExpression(Set<String> expSet, Map<String, List<String>> authParamMap, String sqlTempDelimiter) {
         Iterator<String> iterator = expSet.iterator();
         Map<String, String> map = new HashMap<>();
         while (iterator.hasNext()) {
@@ -289,7 +340,7 @@ public class SqlParseUtils {
         return !CollectionUtils.isEmpty(map) ? map : null;
     }
 
-    private static String getAuthVarExpression(String srcExpression, Map<String, List<String>> authParamMap, char sqlTempDelimiter) throws Exception {
+    private static String getAuthVarExpression(String srcExpression, Map<String, List<String>> authParamMap, String sqlTempDelimiter) throws Exception {
 
         if (null == authParamMap) {
             return QUERY_WHERE_TRUE;
@@ -306,7 +357,7 @@ public class SqlParseUtils {
             srcExpression = srcExpression.substring(1, srcExpression.length() - 1);
         }
 
-        String sql = String.format(Constants.SELECT_EXEPRESSION, srcExpression);
+        String sql = String.format(Constants.SELECT_EXPRESSION, srcExpression);
         Select select = (Select) CCJSqlParserUtil.parse(sql);
         PlainSelect plainSelect = (PlainSelect) select.getSelectBody();
         Expression where = plainSelect.getWhere();
@@ -376,7 +427,7 @@ public class SqlParseUtils {
                             case NOTEQUALSTO:
                                 expBuilder
                                         .append(left).append(SPACE)
-                                        .append(SqlOperatorEnum.NoTIN.getValue()).append(SPACE)
+                                        .append(SqlOperatorEnum.NOTIN.getValue()).append(SPACE)
                                         .append(collect.stream().collect(Collectors.joining(COMMA, PARENTHESES_START, PARENTHESES_END)));
                                 break;
 
@@ -424,65 +475,68 @@ public class SqlParseUtils {
 
     private String replaceSystemVariables(String sql, User user, boolean isMaintainer) {
         if (isMaintainer) {
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_ID.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_ID.getRegex()), QUERY_WHERE_TRUE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_NAME.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_NAME.getRegex()), QUERY_WHERE_TRUE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_USERNAME.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_USERNAME.getRegex()), QUERY_WHERE_TRUE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_EMAIL.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_EMAIL.getRegex()), QUERY_WHERE_TRUE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_DEPARTMENT.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_DEPARTMENT.getRegex()), QUERY_WHERE_TRUE);
-            }
-            if (SystemVariableEnum.isContains(sql)) {
-                throw new ServerException("Illegal system variables, only supports \"=\" or \"!=\"");
-            }
-            return sql;
+            return replaceSysVarCondition(sql, QUERY_WHERE_TRUE, null);
         }
         if (user == null) {
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_ID.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_ID.getRegex()), QUERY_WHERE_FALSE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_NAME.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_NAME.getRegex()), QUERY_WHERE_FALSE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_USERNAME.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_USERNAME.getRegex()), QUERY_WHERE_FALSE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_EMAIL.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_EMAIL.getRegex()), QUERY_WHERE_FALSE);
-            }
-            if (sql.toUpperCase().contains(SystemVariableEnum.USER_DEPARTMENT.getKey())) {
-                sql = sql.replaceAll(REG_IGNORE_CASE + String.format(REG_SYSVAR, SystemVariableEnum.USER_DEPARTMENT.getRegex()), QUERY_WHERE_FALSE);
-            }
-            if (SystemVariableEnum.isContains(sql)) {
-                throw new ServerException("Illegal system variables, only supports \"=\" or \"!=\"");
-            }
+            return replaceSysVarCondition(sql, QUERY_WHERE_FALSE, null);
+        }
+        return replaceSysVarCondition(sql, null, user);
+    }
+
+    @NotNull
+    private String replaceSysVarCondition(String sql, String condition, User user) {
+
+        if (StringUtils.isEmpty(condition) && user == null) {
             return sql;
         }
+
         if (sql.toUpperCase().contains(SystemVariableEnum.USER_ID.getKey())) {
-            sql = sql.replaceAll(REG_IGNORE_CASE + SystemVariableEnum.USER_ID.getRegex(), user.getId().toString());
+            String regex = condition != null ? String.format(REG_SYSVAR, SystemVariableEnum.USER_ID.getRegex())
+                    : SystemVariableEnum.USER_ID.getRegex();
+            String repl = user == null ? condition : user.getId().toString();
+            sql = sql.replaceAll(REG_IGNORE_CASE + regex, repl);
         }
+
         if (sql.toUpperCase().contains(SystemVariableEnum.USER_NAME.getKey())) {
-            sql = sql.replaceAll(REG_IGNORE_CASE + SystemVariableEnum.USER_NAME.getRegex(), String.format(QUERY_WHERE_VALUE, user.getName()));
+            String regex = condition != null ? String.format(REG_SYSVAR, SystemVariableEnum.USER_NAME.getRegex())
+                    : SystemVariableEnum.USER_NAME.getRegex();
+            String repl = user == null ? condition : String.format(QUERY_WHERE_VALUE, user.getName());
+            sql = sql.replaceAll(REG_IGNORE_CASE + regex, repl);
         }
+
         if (sql.toUpperCase().contains(SystemVariableEnum.USER_USERNAME.getKey())) {
-            sql = sql.replaceAll(REG_IGNORE_CASE + SystemVariableEnum.USER_USERNAME.getRegex(), String.format(QUERY_WHERE_VALUE, user.getUsername()));
+            String regex = condition != null ? String.format(REG_SYSVAR, SystemVariableEnum.USER_USERNAME.getRegex())
+                    : SystemVariableEnum.USER_USERNAME.getRegex();
+            String repl = user == null ? condition : String.format(QUERY_WHERE_VALUE, user.getUsername());
+            sql = sql.replaceAll(REG_IGNORE_CASE + regex, repl);
         }
+
         if (sql.toUpperCase().contains(SystemVariableEnum.USER_EMAIL.getKey())) {
-            sql = sql.replaceAll(REG_IGNORE_CASE + SystemVariableEnum.USER_EMAIL.getRegex(), String.format(QUERY_WHERE_VALUE, user.getEmail()));
+            String regex = condition != null ? String.format(REG_SYSVAR, SystemVariableEnum.USER_EMAIL.getRegex())
+                    : SystemVariableEnum.USER_EMAIL.getRegex();
+            String repl = user == null ? condition : String.format(QUERY_WHERE_VALUE, user.getEmail());
+            sql = sql.replaceAll(REG_IGNORE_CASE + regex, repl);
         }
+
         if (sql.toUpperCase().contains(SystemVariableEnum.USER_DEPARTMENT.getKey())) {
-            sql = sql.replaceAll(REG_IGNORE_CASE + SystemVariableEnum.USER_DEPARTMENT.getRegex(), String.format(QUERY_WHERE_VALUE, user.getDepartment()));
+            String regex = condition != null ? String.format(REG_SYSVAR, SystemVariableEnum.USER_DEPARTMENT.getRegex())
+                    : SystemVariableEnum.USER_DEPARTMENT.getRegex();
+            String repl = user == null ? condition : String.format(QUERY_WHERE_VALUE, user.getDepartment());
+            sql = sql.replaceAll(REG_IGNORE_CASE + regex, repl);
         }
-        if (SystemVariableEnum.isContains(sql)) {
-            throw new ServerException("Illegal system variables, only supports \"=\" or \"!=\"");
-        }
+
         return sql;
+    }
+
+    /**
+     * 过滤sql中的注释
+     *
+     * @param sql
+     * @return
+     */
+    public static String filterAnnotate(String sql) {
+        String temp = PATTERN_SQL_ANNOTATE.matcher(sql).replaceAll("$1").replaceAll(NEW_LINE_CHAR, SPACE).replaceAll("(;" +
+                "+\\s*)+", SEMICOLON);
+        return temp;
     }
 }

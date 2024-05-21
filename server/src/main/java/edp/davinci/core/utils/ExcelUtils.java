@@ -32,7 +32,6 @@ import edp.davinci.core.enums.NumericUnitEnum;
 import edp.davinci.core.enums.SqlColumnEnum;
 import edp.davinci.core.model.*;
 import edp.davinci.dto.viewDto.Param;
-import jdk.nashorn.api.scripting.ScriptObjectMirror;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
@@ -40,9 +39,7 @@ import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.script.Invocable;
 import javax.script.ScriptEngine;
-import javax.script.ScriptException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
@@ -50,7 +47,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static edp.core.consts.Consts.*;
-import static edp.davinci.common.utils.ScriptUtiils.formatHeader;
+import static edp.davinci.common.utils.ScriptUtils.formatHeader;
+
 
 public class ExcelUtils {
 
@@ -83,7 +81,7 @@ public class ExcelUtils {
 
             //前两行表示列名和类型
             if (sheet.getLastRowNum() < 1) {
-                throw new ServerException("EMPTY excel");
+                throw new ServerException("Empty excel");
             }
             //列
             Row headerRow = sheet.getRow(0);
@@ -96,7 +94,6 @@ public class ExcelUtils {
                     headers.add(new QueryColumn(headerRow.getCell(i).getStringCellValue(),
                             SqlUtils.formatSqlType(typeRow.getCell(i).getStringCellValue())));
                 } catch (Exception e) {
-                    e.printStackTrace();
                     if (e instanceof NullPointerException) {
                         throw new ServerException("Unknown Type");
                     }
@@ -120,7 +117,6 @@ public class ExcelUtils {
             dataUploadEntity.setValues(values);
 
         } catch (ServerException e) {
-            e.printStackTrace();
             throw new ServerException(e.getMessage());
         }
 
@@ -140,7 +136,6 @@ public class ExcelUtils {
                 throw new ServerException("Invalid excel file");
             }
         } catch (IOException e) {
-            e.printStackTrace();
             throw new ServerException(e.getMessage());
         } finally {
             FileUtils.closeCloseable(inputStream);
@@ -149,12 +144,15 @@ public class ExcelUtils {
 
 
     /**
+     *
      * 写入数据到excel sheet页
      *
      * @param sheet
      * @param columns
      * @param dataList
      * @param workbook
+     * @param containType
+     * @param widgetConfig
      * @param params
      */
     public static void writeSheet(Sheet sheet,
@@ -162,7 +160,7 @@ public class ExcelUtils {
                                   List<Map<String, Object>> dataList,
                                   SXSSFWorkbook workbook,
                                   boolean containType,
-                                  String json,
+                                  String widgetConfig,
                                   List<Param> params) {
 
 
@@ -182,19 +180,19 @@ public class ExcelUtils {
         //表头粗体居中
         Font font = workbook.createFont();
         font.setFontName("黑体");
-        font.setBoldweight(Font.BOLDWEIGHT_BOLD);
+        font.setBold(true);
         headerCellStyle.setFont(font);
         headerCellStyle.setDataFormat(format.getFormat("@"));
-        headerCellStyle.setAlignment(CellStyle.ALIGN_CENTER);
-        headerCellStyle.setVerticalAlignment(CellStyle.VERTICAL_CENTER);
+        headerCellStyle.setAlignment(HorizontalAlignment.CENTER);
+        headerCellStyle.setVerticalAlignment(VerticalAlignment.CENTER);
 
-        boolean isTable = isTable(json);
+        boolean isTable = isTable(widgetConfig);
 
         ScriptEngine engine = null;
         List<ExcelHeader> excelHeaders = null;
         if (isTable) {
             try {
-                excelHeaders = formatHeader(json, params);
+                excelHeaders = formatHeader(widgetConfig, params);
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -442,12 +440,6 @@ public class ExcelUtils {
 
         } else if (fieldTypeObject instanceof FieldCustom) {
 
-        } else if (fieldTypeObject instanceof FieldDate) {
-
-            // TODO need to fix impossible cast
-            FieldCustom fieldCustom = (FieldCustom) fieldTypeObject;
-
-            formatExpr = fieldCustom.getFormat().toLowerCase();
         } else if (fieldTypeObject instanceof FieldPercentage) {
 
             FieldPercentage fieldPercentage = (FieldPercentage) fieldTypeObject;
@@ -455,12 +447,12 @@ public class ExcelUtils {
             StringBuilder fmtSB = new StringBuilder("0");
             if (fieldPercentage.getDecimalPlaces() > 0) {
                 fmtSB.append(".").append(makeNTimesString(fieldPercentage.getDecimalPlaces(), 0));
-
             }
 
             fmtSB.append(PERCENT_SIGN);
 
             formatExpr = fmtSB.toString();
+
         } else if (fieldTypeObject instanceof FieldScientificNotation) {
 
             FieldScientificNotation fieldScientificNotation = (FieldScientificNotation) fieldTypeObject;
@@ -474,6 +466,7 @@ public class ExcelUtils {
             fmtSB.append("E+00");
 
             formatExpr = fmtSB.toString();
+
         }
 
         return formatExpr;
@@ -527,47 +520,6 @@ public class ExcelUtils {
     private static String makeNTimesString(int n, Object s) {
         return IntStream.range(0, n).mapToObj(i -> String.valueOf(s)).collect(Collectors.joining(EMPTY));
     }
-
-
-    /**
-     * format cell value
-     *
-     * @param engine
-     * @param list
-     * @param json
-     * @return
-     */
-    private static List<Map<String, Object>> formatValue(ScriptEngine engine, List<Map<String, Object>> list, String json) {
-        try {
-            Invocable invocable = (Invocable) engine;
-            Object obj = invocable.invokeFunction("getFormattedDataRows", json, list);
-
-            if (obj instanceof ScriptObjectMirror) {
-                ScriptObjectMirror som = (ScriptObjectMirror) obj;
-                if (som.isArray()) {
-                    final List<Map<String, Object>> convertList = new ArrayList<>();
-                    Collection<Object> values = som.values();
-                    values.forEach(v -> {
-                        Map<String, Object> map = new HashMap<>();
-                        ScriptObjectMirror vsom = (ScriptObjectMirror) v;
-                        for (String key : vsom.keySet()) {
-                            map.put(key, vsom.get(key));
-                        }
-                        convertList.add(map);
-                    });
-                    return convertList;
-                }
-            }
-
-        } catch (ScriptException e) {
-            e.printStackTrace();
-        } catch (NoSuchMethodException e) {
-            e.printStackTrace();
-        }
-
-        return list;
-    }
-
 
     public static boolean isTable(String json) {
         if (!StringUtils.isEmpty(json)) {

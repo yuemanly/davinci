@@ -48,14 +48,13 @@ import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import java.security.Principal;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
 
 @Api(tags = "login", basePath = Constants.BASE_API_PATH, consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
 @ApiResponses({
-        @ApiResponse(code = 400, message = "pwd is wrong"),
+        @ApiResponse(code = 400, message = "password is wrong"),
         @ApiResponse(code = 404, message = "user not found")
 })
 @RestController
@@ -92,8 +91,8 @@ public class LoginController {
 
         User user = userService.userLogin(userLogin);
         if (!user.getActive()) {
-            log.info("this user is not active： {}", userLogin.getUsername());
-            ResultMap resultMap = new ResultMap(tokenUtils).failWithToken(tokenUtils.generateToken(user)).message("this user is not active");
+            log.error("User is not active, username:{}", userLogin.getUsername());
+            ResultMap resultMap = new ResultMap(tokenUtils).failWithToken(tokenUtils.generateToken(user)).message("This user is not active");
             return ResponseEntity.status(resultMap.getCode()).body(resultMap);
         }
 
@@ -106,7 +105,7 @@ public class LoginController {
         return ResponseEntity.ok(new ResultMap().success(tokenUtils.generateToken(user)).payload(userLoginResult));
     }
 
-    @ApiOperation(value = "get oauth2 clents")
+    @ApiOperation(value = "get oauth2 clients")
     @GetMapping(value = "getOauth2Clients", consumes = MediaType.ALL_VALUE, produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
     @AuthIgnore
     public ResponseEntity getOauth2Clients(HttpServletRequest request) {

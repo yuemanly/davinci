@@ -25,13 +25,20 @@ import { IScorecardConfig } from '../Workbench/ConfigSections/ScorecardSection'
 import { IGaugeConfig } from '../Workbench/ConfigSections/GaugeSection'
 import { IframeConfig } from '../Workbench/ConfigSections/IframeSection'
 import { ITableConfig } from '../Config/Table'
-import { IRichTextConfig, IBarConfig, IRadarConfig } from '../Workbench/ConfigSections'
+import {
+  IRichTextConfig,
+  IBarConfig,
+  IRadarConfig
+} from '../Workbench/ConfigSections'
 import { IDoubleYAxisConfig } from '../Workbench/ConfigSections/DoubleYAxisSection'
 import { IViewModel } from 'containers/View/types'
 import { IQueryVariableMap } from 'containers/Dashboard/types'
-import { ILocalControl } from 'app/components/Control/types'
+import { IControl } from 'app/components/Control/types'
 import { RichTextNode } from 'app/components/RichText'
 import { IReference } from '../Workbench/Reference/types'
+import { ControlQueryMode } from 'app/components/Control/constants'
+import { ViewModelTypes } from 'containers/View/constants'
+
 const styles = require('../Pivot/Pivot.less')
 
 export type DimetionType = 'row' | 'col'
@@ -51,6 +58,7 @@ export interface IWidgetDimension {
   field: IFieldConfig
   format: IFieldFormatConfig
   sort: IFieldSortConfig
+  type?: ViewModelTypes
 }
 
 export interface IWidgetMetric {
@@ -125,7 +133,7 @@ export interface IPaginationParams {
   withPaging: boolean
 }
 
-interface IWidgetConfigBase {
+export interface IWidgetConfigBase {
   data: object[]
   cols: IWidgetDimension[]
   rows: IWidgetDimension[]
@@ -142,7 +150,7 @@ interface IWidgetConfigBase {
   yAxis?: IDataParamProperty
   dimetionAxis?: DimetionType
   renderType?: RenderType
-  orders: Array<{ column: string, direction: string }>
+  orders: Array<{ column: string; direction: string }>
   mode: WidgetMode
   model: IViewModel
   pagination?: IPaginationParams
@@ -157,8 +165,15 @@ export interface IWidgetProps extends IWidgetConfigBase {
   onCheckTableInteract?: () => boolean
   onDoInteract?: (triggerData: object) => void
   getDataDrillDetail?: (position: string) => void
-  onPaginationChange?: (pageNo: number, pageSize: number, order?: { column: string, direction: string }) => void
-  onChartStylesChange?: (propPath: string[], value: string | RichTextNode[]) => void
+  onPaginationChange?: (
+    pageNo: number,
+    pageSize: number,
+    order?: { column: string; direction: string }
+  ) => void
+  onChartStylesChange?: (
+    propPath: string[],
+    value: string | RichTextNode[]
+  ) => void
   isDrilling?: boolean
   whichDataDrillBrushed?: boolean | object[]
   selectedItems?: number[]
@@ -168,10 +183,12 @@ export interface IWidgetProps extends IWidgetConfigBase {
 }
 
 export interface IWidgetConfig extends IWidgetConfigBase {
-  controls: ILocalControl[]
+  controls: IControl[]
+  limit: number
   cache: boolean
   expired: number
   autoLoadData: boolean
+  queryMode: ControlQueryMode
 }
 
 export interface IWidgetWrapperProps extends IWidgetProps {
@@ -192,7 +209,7 @@ export class Widget extends React.Component<
     editing: false
   }
 
-  constructor (props) {
+  constructor(props) {
     super(props)
     this.state = {
       width: 0,
@@ -201,13 +218,19 @@ export class Widget extends React.Component<
   }
 
   private container = createRef<HTMLDivElement>()
-  private remeasureRenderTypes = ['rerender', 'clear', 'refresh', 'resize', 'flush']
+  private remeasureRenderTypes = [
+    'rerender',
+    'clear',
+    'refresh',
+    'resize',
+    'flush'
+  ]
 
-  public componentDidMount () {
+  public componentDidMount() {
     this.getContainerSize()
   }
 
-  public componentWillReceiveProps (nextProps: IWidgetProps) {
+  public componentWillReceiveProps(nextProps: IWidgetProps) {
     if (this.remeasureRenderTypes.includes(nextProps.renderType)) {
       this.getContainerSize()
     }
@@ -229,7 +252,7 @@ export class Widget extends React.Component<
     }
   }
 
-  public render () {
+  public render() {
     const { loading, empty, ...rest } = this.props
     const { width, height } = this.state
 

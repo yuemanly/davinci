@@ -18,9 +18,7 @@
  * >>
  */
 
-import '@babel/polyfill'
-import 'url-search-params-polyfill'
-import 'array-flat-polyfill'
+import 'intersection-observer'
 
 import React from 'react'
 import ReactDOM from 'react-dom'
@@ -35,7 +33,7 @@ import zh_CN from 'antd/es/locale/zh_CN'
 import LanguageProvider from 'containers/LanguageProvider'
 import { translationMessages } from './i18n'
 import moment from 'moment'
-import 'moment/src/locale/zh-cn'
+import 'moment/dist/locale/zh-cn'
 moment.locale('zh-cn')
 
 import '!file-loader?name=[name].[ext]!./favicon.ico'
@@ -85,7 +83,6 @@ import { DEFAULT_ECHARTS_THEME } from 'app/globalConstants'
 echarts.registerTheme('default', DEFAULT_ECHARTS_THEME)
 
 import configureStore from './configureStore'
-import 'utils/localStorage'
 
 
 const initialState = {}

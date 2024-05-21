@@ -30,6 +30,7 @@ import edp.core.exception.ServerException;
 import edp.core.model.MailContent;
 import edp.core.utils.*;
 import edp.davinci.core.common.Constants;
+import edp.davinci.core.common.ErrorMsg;
 import edp.davinci.core.common.ResultMap;
 import edp.davinci.core.enums.CheckEntityEnum;
 import edp.davinci.core.enums.LockType;
@@ -129,15 +130,15 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
         String username = userRegist.getUsername();
         //用户名是否已经注册
         if (isExist(username, null, null)) {
-            log.info("the username {} has been registered", username);
-            throw new ServerException("the username:" + username + " has been registered");
+            log.info("The username({}) has been registered", username);
+            throw new ServerException("The username:" + username + " has been registered");
         }
 
         String email = userRegist.getEmail();
         //邮箱是否已经注册
         if (isExist(email, null, null)) {
-            log.info("the email {} has been registered", email);
-            throw new ServerException("the email:" + email + " has been registered");
+            log.info("The email({}) has been registered", email);
+            throw new ServerException("The email:" + email + " has been registered");
         }
 
         BaseLock usernameLock = getLock(entity, username, null);
@@ -161,8 +162,8 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
             BeanUtils.copyProperties(userRegist, user);
             //添加用户
             if (userMapper.insert(user) <= 0) {
-                log.info("regist fail: {}", userRegist.toString());
-                throw new ServerException("regist fail: unspecified error");
+                log.info("Regist fail, userRegist:{}", userRegist.toString());
+                throw new ServerException("Regist fail, unspecified error");
             }
             //添加成功，发送激活邮件
             sendMail(user.getEmail(), user);
@@ -197,14 +198,14 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
         if (insert > 0) {
             return user;
         } else {
-            log.info("regist fail: {}", oauthUser.getName());
-            throw new ServerException("regist fail: unspecified error");
+            log.info("Regist fail, username:{}", oauthUser.getName());
+            throw new ServerException("Regist fail, unspecified error");
         }
     }
 
     protected void alertNameTaken(CheckEntityEnum entity, String name) throws ServerException {
-        log.warn("the {} username or email ({}) has been registered", entity.getSource(), name);
-        throw new ServerException("the " + entity.getSource() + " username or email has been registered");
+        log.warn("The {} username or email {} has been registered", entity.getSource(), name);
+        throw new ServerException("The " + entity.getSource() + " username or email has been registered");
     }
 
     /**
@@ -248,13 +249,13 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
                 return user;
             }
 
-            log.info("username({}) password is wrong", username);
-            throw new ServerException("username or password is wrong");
+            log.info("Username({}) password is wrong", username);
+            throw new ServerException("Username or password is wrong");
         }
 
         user = ldapAutoRegist(username, password);
         if (user == null) {
-            throw new ServerException("username or password is wrong");
+            throw new ServerException("Username or password is wrong");
         }
         return user;
     }
@@ -280,13 +281,13 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
 
         LdapPerson ldapPerson = ldapService.findByUsername(username, password);
         if (null == ldapPerson) {
-            throw new ServerException("username or password is wrong");
+            throw new ServerException("Username or password is wrong");
         }
 
         String email = ldapPerson.getEmail();
         if (userMapper.existEmail(ldapPerson.getEmail())) {
-            log.info("ldap auto regist fail: the email {} has been registered", email);
-            throw new ServerException("ldap auto regist fail: the email " + email + " has been registered");
+            log.info("Ldap auto regist fail, the email {} has been registered", email);
+            throw new ServerException("Ldap auto regist fail: the email " + email + " has been registered");
         }
 
         if (userMapper.existUsername(ldapPerson.getSAMAccountName())) {
@@ -333,8 +334,8 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
     @Transactional
     public boolean updateUser(User user) throws ServerException {
         if (userMapper.updateBaseInfo(user) <= 0) {
-            log.info("update user fail, username: {}", user.getUsername());
-            throw new ServerException("update user fail");
+            log.info("Update user fail, username:{}", user.getUsername());
+            throw new ServerException("Update user fail");
         }
         return true;
     }
@@ -357,7 +358,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
 
         // 已经激活，不需要再次激活
         if (user.getActive()) {
-            return resultMap.fail(302).message("The current user is activated and doesn't need to be reactivated");
+            return resultMap.fail().message("The current user is activated and doesn't need to be reactivated");
         }
 
         BaseLock lock = LockFactory.getLock("ACTIVATE" + Consts.AT_SYMBOL + username.toUpperCase(), 5, LockType.REDIS);
@@ -373,7 +374,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
                 userMapper.activeUser(user);
 
                 String orgName = user.getUsername() + "'s Organization";
-                // 激活成功，创建默认Orgnization
+                // 激活成功，创建默认Organization
                 Organization organization = new Organization(orgName, null, user.getId());
                 organizationMapper.insert(organization);
 
@@ -469,7 +470,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
 
         //校验文件是否图片
         if (!fileUtils.isImage(file)) {
-            return resultMap.failAndRefreshToken(request).message("file format error");
+            return resultMap.failAndRefreshToken(request).message("File format error");
         }
 
         //上传文件
@@ -478,11 +479,11 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
         try {
             avatar = fileUtils.upload(file, Constants.USER_AVATAR_PATH, fileName);
             if (StringUtils.isEmpty(avatar)) {
-                return resultMap.failAndRefreshToken(request).message("user avatar upload error");
+                return resultMap.failAndRefreshToken(request).message("User avatar upload error");
             }
         } catch (Exception e) {
-            log.error("user avatar upload error, username: {}, error: {}", user.getUsername(), e.getMessage());
-            return resultMap.failAndRefreshToken(request).message("user avatar upload error");
+            log.error("User avatar upload error, username:{}", user.getUsername(), e);
+            return resultMap.failAndRefreshToken(request).message("User avatar upload error");
         }
 
         //删除原头像
@@ -499,7 +500,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
             return resultMap.successAndRefreshToken(request).payload(map);
         }
 
-        return resultMap.failAndRefreshToken(request).message("server error, user avatar update fail");
+        return resultMap.failAndRefreshToken(request).message("Server error, user avatar update fail");
     }
 
 
@@ -517,7 +518,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
 
         User tempUser = userMapper.getById(id);
         if (null == tempUser) {
-            return resultMap.failAndRefreshToken(request).message("user not found");
+            return resultMap.failAndRefreshToken(request).message("User not found");
         }
 
         UserProfile userProfile = new UserProfile();
@@ -544,10 +545,10 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
         String username = tokenUtils.getUsername(Constants.TOKEN_PREFIX + Constants.SPACE + token);
         User user = getByUsername(username);
         if (null == user) {
-            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message("ERROR Permission denied");
+            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message(ErrorMsg.ERR_MSG_PERMISSION);
         }
         if (!tokenUtils.validateToken(token, user)) {
-            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message("ERROR Permission denied");
+            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message(ErrorMsg.ERR_MSG_PERMISSION);
         }
         UserProfile userProfile = new UserProfile();
         BeanUtils.copyProperties(user, userProfile);
@@ -563,11 +564,11 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
             case EMAIL:
                 String email = ticket.getTicket();
                 if (StringUtils.isEmpty(email)) {
-                    throw new ServerException("email cannot be EMPTY!");
+                    throw new ServerException("Email cannot be empty!");
                 }
                 Matcher matcher = Constants.PATTERN_EMAIL_FORMAT.matcher(email);
                 if (!matcher.find()) {
-                    throw new ServerException("invalid email format!");
+                    throw new ServerException("Invalid email format!");
                 }
                 user = userMapper.selectByUsername(email);
                 if (user == null) {
@@ -577,7 +578,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
             case USERNAME:
                 String username = ticket.getTicket();
                 if (StringUtils.isEmpty(username)) {
-                    throw new ServerException("username cannot be EMPTY!");
+                    throw new ServerException("Username cannot be EMPTY!");
                 }
                 user = userMapper.selectByUsername(username);
                 if (user == null) {
@@ -649,9 +650,9 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
             throw new ServerException("Password cannot be Empty");
         }
 
-        String uncompress = StringZipUtil.uncompress(token);
+        String decompress = StringZipUtil.decompress(token);
         user.setPassword(ticket.getCheckCode());
-        if (!tokenUtils.validateToken(uncompress, user)) {
+        if (!tokenUtils.validateToken(decompress, user)) {
             throw new ServerException("Invalid check code, check code is wrong or has expired");
         }
         user.setPassword(BCrypt.hashpw(ticket.getPassword(), BCrypt.gensalt()));

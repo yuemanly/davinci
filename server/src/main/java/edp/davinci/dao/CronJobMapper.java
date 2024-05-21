@@ -36,13 +36,11 @@ public interface CronJobMapper {
     @Delete({"delete from cron_job where id = #{id,jdbcType=BIGINT}"})
     int deleteById(@Param("id") Long id);
 
-
     @Select({"select * from cron_job where id = #{id}"})
     CronJob getById(@Param("id") Long id);
 
-
     @Select({"select * from cron_job where  job_status in ('stopped','failed') and update_time > (NOW() - INTERVAL 3 MINUTE)"})
-    List<CronJob> getStopedJob();
+    List<CronJob> getStoppedJob();
 
     @Update({
             "update cron_job",
@@ -68,7 +66,6 @@ public interface CronJobMapper {
             "where `id` = #{id,jdbcType=BIGINT}"
     })
     int updateExecLog(@Param("id") Long id, @Param("execLog") String execLog);
-
 
     @Select({"select id from cron_job where project_id = #{projectId} and `name` = #{name}"})
     Long getByNameWithProjectId(@Param("name") String name, @Param("projectId") Long projectId);

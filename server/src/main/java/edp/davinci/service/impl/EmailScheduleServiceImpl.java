@@ -28,7 +28,6 @@ import edp.core.model.MailAttachment;
 import edp.core.model.MailContent;
 import edp.core.utils.CollectionUtils;
 import edp.core.utils.MailUtils;
-import edp.core.utils.ServerUtils;
 import edp.davinci.core.common.Constants;
 import edp.davinci.core.enums.ActionEnum;
 import edp.davinci.core.enums.CronJobMediaType;
@@ -39,22 +38,17 @@ import edp.davinci.dto.cronJobDto.CronJobConfig;
 import edp.davinci.dto.cronJobDto.CronJobContent;
 import edp.davinci.dto.cronJobDto.ExcelContent;
 import edp.davinci.dto.cronJobDto.MsgMailExcel;
-import edp.davinci.dto.dashboardDto.DashboardTree;
 import edp.davinci.dto.dashboardDto.DashboardWithPortal;
 import edp.davinci.dto.projectDto.ProjectDetail;
-import edp.davinci.dto.viewDto.ViewExecuteParam;
 import edp.davinci.dto.widgetDto.WidgetWithRelationDashboardId;
 import edp.davinci.dto.widgetDto.WidgetWithVizId;
 import edp.davinci.model.*;
 import edp.davinci.service.ProjectService;
-import edp.davinci.service.ShareService;
-import edp.davinci.service.excel.ExecutorUtil;
+import edp.davinci.service.excel.ExecutorUtils;
 import edp.davinci.service.excel.MsgWrapper;
 import edp.davinci.service.excel.WidgetContext;
 import edp.davinci.service.excel.WorkBookContext;
 import edp.davinci.service.screenshot.ImageContent;
-import edp.davinci.service.screenshot.ScreenshotUtil;
-import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
@@ -62,7 +56,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import javax.script.ScriptEngine;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
@@ -72,9 +65,7 @@ import java.util.stream.Collectors;
 
 import static edp.core.consts.Consts.AT_SYMBOL;
 import static edp.core.consts.Consts.EMPTY;
-import static edp.davinci.common.utils.ScriptUtiils.getViewExecuteParam;
 
-@Slf4j
 @Service("emailScheduleService")
 public class EmailScheduleServiceImpl extends BaseScheduleService implements ScheduleService {
 
@@ -87,13 +78,16 @@ public class EmailScheduleServiceImpl extends BaseScheduleService implements Sch
     private MailUtils mailUtils;
 
     @Autowired
-    private WidgetMapper widgetMapper;
-
-    @Autowired
     private UserMapper userMapper;
 
     @Autowired
+    private WidgetMapper widgetMapper;
+
+    @Autowired
     private DashboardMapper dashboardMapper;
+
+    @Autowired
+    private MemDashboardWidgetMapper memDashboardWidgetMapper;
 
     @Autowired
     private DisplayMapper displayMapper;
@@ -130,19 +124,19 @@ public class EmailScheduleServiceImpl extends BaseScheduleService implements Sch
         List<ExcelContent> excels = null;
         List<ImageContent> images = null;
 
-        User creater = userMapper.getById(cronJob.getCreateBy());
+        User creator = userMapper.getById(cronJob.getCreateBy());
 
         if (cronJobConfig.getType().equals(CronJobMediaType.IMAGE.getType())) {
-            images = generateImages(jobId, cronJobConfig, creater.getId());
+            images = generateImages(jobId, cronJobConfig, creator.getId());
         }
 
         if (cronJobConfig.getType().equals(CronJobMediaType.EXCEL.getType())) {
-			excels = generateExcels(jobId, cronJobConfig, creater);
+			excels = generateExcels(jobId, cronJobConfig, creator);
         }
 
         if (cronJobConfig.getType().equals(CronJobMediaType.IMAGEANDEXCEL.getType())) {
-            images = generateImages(jobId, cronJobConfig, creater.getId());
-            excels = generateExcels(jobId, cronJobConfig, creater);
+            images = generateImages(jobId, cronJobConfig, creator.getId());
+            excels = generateExcels(jobId, cronJobConfig, creator);
         }
 
         List<MailAttachment> attachmentList = new ArrayList<>();
@@ -238,13 +232,13 @@ public class EmailScheduleServiceImpl extends BaseScheduleService implements Sch
                         if (CollectionUtils.isEmpty(widgets)) {
                             continue;
                         }
+
                         List<WidgetContext> widgetContexts = new ArrayList<>();
                         widgets.forEach(widget -> {
-                            ViewExecuteParam viewExecuteParam = getViewExecuteParam(null, widget.getConfig(), null);
-                            widgetContexts.add(new WidgetContext(widget, isMaintainer, viewExecuteParam));
+                            widgetContexts.add(new WidgetContext(widget, isMaintainer, null));
                         });
 
-                        WorkBookContext workBookContext = WorkBookContext.WorkBookContextBuilder.newBuildder()
+                        WorkBookContext workBookContext = WorkBookContext.WorkBookContextBuilder.newBuilder()
                                 .withWidgets(widgetContexts)
                                 .withUser(user)
                                 .withResultLimit(resultLimit)
@@ -268,17 +262,22 @@ public class EmailScheduleServiceImpl extends BaseScheduleService implements Sch
                 ProjectDetail projectDetail = projectService.getProjectDetail(dashboard.getProject().getId(), user, false);
                 boolean isMaintainer = projectService.isMaintainer(projectDetail, user);
 
-                Set<WidgetWithRelationDashboardId> set = widgetMapper.getByDashboard(cronJobContent.getId());
-                if (!CollectionUtils.isEmpty(set)) {
+                List<WidgetWithRelationDashboardId> widgets = widgetMapper.getByDashboard(cronJobContent.getId());
+                if (!CollectionUtils.isEmpty(widgets)) {
+
+                    List<MemDashboardWidget> mdws = memDashboardWidgetMapper.getByDashboardId(dashboard.getId());
+                    Map<Long, MemDashboardWidget> mdwMap = mdws.stream().collect(Collectors.toMap(o -> o.getWidgetId(), o -> o, (oldV, newV) -> oldV));
+
                     List<WidgetContext> widgetContexts = new ArrayList<>();
-                    set.forEach(w -> {
+                    widgets.forEach(w -> {
                         Widget widget = new Widget();
                         BeanUtils.copyProperties(w, widget);
-                        ViewExecuteParam viewExecuteParam = getViewExecuteParam(dashboard.getConfig(), widget.getConfig(), w.getRelationId());
-                        widgetContexts.add(new WidgetContext(widget, isMaintainer, viewExecuteParam));
+                        WidgetContext context = new WidgetContext(widget, dashboard, mdwMap.get(widget.getId()), null);
+                        context.setIsMaintainer(isMaintainer);
+                        widgetContexts.add(context);
                     });
 
-                    WorkBookContext workBookContext = WorkBookContext.WorkBookContextBuilder.newBuildder()
+                    WorkBookContext workBookContext = WorkBookContext.WorkBookContextBuilder.newBuilder()
                             .withWidgets(widgetContexts)
                             .withUser(user)
                             .withResultLimit(resultLimit)
@@ -307,7 +306,7 @@ public class EmailScheduleServiceImpl extends BaseScheduleService implements Sch
             try {
             	String uuid = UUID.randomUUID().toString().replace("-", EMPTY);
                 context.setWrapper(new MsgWrapper(new MsgMailExcel(jobId), ActionEnum.MAIL, uuid));
-                excelPathFutureMap.put(name, ExecutorUtil.submitWorkbookTask(context, scheduleLogger));
+                excelPathFutureMap.put(name, ExecutorUtils.submitWorkbookTask(context, scheduleLogger));
             }catch (Exception e) {
             	scheduleLogger.error("Cronjob({}) submit workbook task error, thread:{}", jobId, index.get());
             	scheduleLogger.error(e.getMessage(), e);
@@ -334,5 +333,4 @@ public class EmailScheduleServiceImpl extends BaseScheduleService implements Sch
         scheduleLogger.info("CronJob({}) fetched excel contents, count:{}", jobId, excelContents.size());
         return excelContents.isEmpty() ? null : excelContents;
     }
-
 }
